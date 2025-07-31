@@ -1,5 +1,6 @@
 node_modules
 build
+dist
 out
 docs
 .vscode
@@ -11,6 +12,7 @@ bundle.js
 *.pem
 *.crt
 
+!tsconfig.json
 !.eslintrc.json
 !package.json
 !package-lock.json

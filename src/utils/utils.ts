@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * An utility module containing helper methods.
  * @module utils
@@ -9,11 +7,11 @@
 /**
  * Generate a random alpha-numeric string with a given length.
  *
- * @param {number} [len=12] - The length of the string
- * @returns {string} A random alpha-numeric string
+ * @param [len=12] - The length of the string
+ * @returns A random alpha-numeric string
  *
  */
-export const randomString = (len = 12) => {
+export const randomString = (len: number = 12) => {
   const charSet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let randomString = '';
   for (let i = 0; i < len; i++) {
@@ -29,11 +27,11 @@ export const randomString = (len = 12) => {
  *
  * @returns {string} A numeric string
  */
-export const getNumericID = (_ => {
+export const getNumericID = (() => {
   let now;
   let next = Math.floor(Number.MAX_SAFE_INTEGER * Math.random());
 
-  return _ => {
+  return () => {
     now = next;
     next = next + 1;
     if (next >= Number.MAX_SAFE_INTEGER) next = 0;
@@ -42,26 +40,28 @@ export const getNumericID = (_ => {
 })();
 
 /**
- * @typedef {Object} CircularIterator
- * @property {function} nextElem - Advance the iterator and get the new element
- * @property {function} currElem - Get the current element without advancing
+ * @property nextElem - Advance the iterator and get the new element
+ * @property currElem - Get the current element without advancing
  */
+export type CircularIterator<T> = {
+  nextElem: () => T,
+  currElem: () => T
+}
 
 /**
  * Generate a circular iterator from an array.
  *
- * @param {Array} list - The array that must be iterated
- * @returns {CircularIterator} The generated iterator
+ * @param list - The array that must be iterated
+ * @returns The generated iterator
  */
-export const newIterator = list => {
+export const newIterator = <T>(list: T[]) => {
   const l = Array.from(list);
   const len = l.length;
   var i = 0;
 
-  /** @type {CircularIterator} */
-  const iterator = {
-    nextElem: _ => l[i++ % len],
-    currElem: _ => l[i % len],
+  const iterator: CircularIterator<T> = {
+    nextElem: () => l[i++ % len],
+    currElem: () => l[i % len],
   };
 
   return iterator;
@@ -70,11 +70,11 @@ export const newIterator = list => {
 /**
  * Return a promise that will resolve after a given amount of milliseconds.
  *
- * @param {number} ms - The amount of millis to wait before resolving
- * @returns {Promise<void>} A promise that will resolve after a certain time
+ * @param ms - The amount of millis to wait before resolving
+ * @returns A promise that will resolve after a certain time
  */
-export const delayOp = ms => {
-  return new Promise((resolve) => {
+export const delayOp = (ms: number) => {
+  return new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
 };
@@ -82,11 +82,11 @@ export const delayOp = ms => {
 /**
  * Check if a url string contains one of the protocols in a white list.
  *
- * @param {string} url_string - The url string to be checked
- * @param {Array} admitted - The admitted protocols
- * @returns {boolean} True if the check succeeds
+ * @param url_string - The url string to be checked
+ * @param admitted - The admitted protocols
+ * @returns True if the check succeeds
  */
-export const checkUrl = (url_string, admitted) => {
+export const checkUrl = (url_string: string, admitted: string[]) => {
   try {
     /* 'slice(0, -1)' removes the colon at the last position */
     const protocol = (new URL(url_string)).protocol.slice(0, -1);
@@ -95,15 +95,16 @@ export const checkUrl = (url_string, admitted) => {
   return false;
 };
 
+type CLIArgType = string | number | boolean
 /**
  * Get a CLI argument.
  *
- * @param {string} arg_name - The argument name
- * @param {("string"|"number"|"boolean")} arg_type - The argument type
- * @param {string|number|boolean} arg_default - An optional default value if missing
- * @returns {string|number|boolean|void}
+ * @param arg_name - The argument name
+ * @param arg_type - The argument type
+ * @param arg_default - An optional default value if missing
+ * @returns
  */
-export const getCliArgument = (arg_name, arg_type, arg_default) => {
+export const getCliArgument = <T extends CLIArgType>(arg_name: string, arg_type: "string" | "number" | "boolean", arg_default?: T): T | undefined => {
   if (typeof process === 'undefined' || !Array.isArray(process.argv) || process.argv.length < 2) return arg_default;
   const args = process.argv.slice(2);
   let arg_val = undefined;
@@ -117,17 +118,17 @@ export const getCliArgument = (arg_name, arg_type, arg_default) => {
       arg_val = param.split('=').length > 1 ? param.split('=')[1] : arg_val;
       if (arg_val) {
         if (arg_type === 'boolean') {
-          if (arg_val.toLowerCase() === 'false') arg_val = false;
-          else if (arg_val.toLowerCase() === 'true') arg_val = true;
+          if ((arg_val as string).toLowerCase() === 'false') arg_val = false;
+          else if ((arg_val as string).toLowerCase() === 'true') arg_val = true;
           if (typeof arg_val !== 'boolean') arg_val = undefined;
         }
         if (arg_type === 'number') {
-          arg_val = parseInt(arg_val);
+          arg_val = parseInt((arg_val as string));
           if (!Number.isInteger(arg_val)) arg_val = undefined;
         }
       }
     }
   }
   arg_val = typeof arg_val !== 'undefined' ? arg_val : arg_default;
-  return arg_val;
+  return (arg_val as T);
 };

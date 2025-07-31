@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * This module contains the Handle class definition.
  * @module handle
@@ -8,10 +6,20 @@
 
 import { EventEmitter } from 'events';
 
-import Logger from './utils/logger.js';
-const LOG_NS = '[handle.js]';
-import { getNumericID } from './utils/utils.js';
-import { JANUS, JANODE, isAckData, isResponseData, isErrorData } from './protocol.js';
+import Logger from './utils/logger.ts';
+const LOG_NS = '[handle.ts]';
+import { getNumericID } from './utils/utils.ts';
+import { JANUS, JANODE, isAckData, isResponseData, isErrorData } from './protocol.ts';
+
+import Session from './session.ts';
+import TransactionManager from './tmanager.ts';
+import type { TransactionOwner, PendingTransaction } from './tmanager.ts';
+
+// TODO: are JanodeRequest/JanusMessage and JanodeResponse/JanodeEvent the same thing?
+export type JanodeRequest = any
+export type JanodeResponse = any
+export type JanusMessage = any
+export type JanodeEvent = any
 
 const PLUGIN_EVENT_SYM = Symbol('plugin_event');
 
@@ -26,66 +34,56 @@ const PLUGIN_EVENT_SYM = Symbol('plugin_event');
  *
  * @hideconstructor
  */
-class Handle extends EventEmitter {
+class Handle extends EventEmitter implements TransactionOwner {
+  private _tm: TransactionManager;
+  private _detaching: boolean;
+  private _detached: boolean;
+  session: Session;
+  id: number;
+  name: string;
+  private _sessionDestroyedListener: () => void;
   /**
    * Create a Janode handle.
    *
-   * @param {module:session~Session} session - A reference to the parent session
-   * @param {number} id - The handle identifier
+   * @param session - A reference to the parent session
+   * @param id - The handle identifier
    */
-  constructor(session, id) {
+  constructor(session: Session, id: number) {
     super();
 
     /**
      * The transaction manager used by this handle.
-     *
-     * @private
-     * @type {module:tmanager~TransactionManager}
      */
     this._tm = session._tm; // keep track of pending requests
 
     /**
      * A boolean flag indicating that the handle is being detached.
      * Once the detach has been completed, the flag returns to false.
-     *
-     * @private
-     * @type {boolean}
      */
     this._detaching = false;
 
     /**
      * A boolean flag indicating that the handle has been detached.
-     *
-     * @private
-     * @type {boolean}
      */
     this._detached = false;
 
     /**
      * The parent Janode session.
-     *
-     * @type {Session}
      */
     this.session = session;
 
     /**
      * The handle unique id, usually taken from Janus response.
-     *
-     * @type {number}
      */
     this.id = id;
 
     /**
      * A more descriptive, not unique string (used for logging).
-     *
-     * @type {string}
      */
     this.name = `[${this.id}]`;
 
     /**
      * The callback function used for a session destroyed event.
-     *
-     * @private
      */
     this._sessionDestroyedListener = this._signalDetach.bind(this);
 
@@ -101,7 +99,7 @@ class Handle extends EventEmitter {
    *
    * @private
    */
-  _signalDetach() {
+  _signalDetach(): void {
     if (this._detached) return;
     this._detaching = false;
     this._detached = true;
@@ -114,7 +112,7 @@ class Handle extends EventEmitter {
     /**
      * The handle has been detached.
      *
-     * @event module:handle~Handle#event:HANDLE_DETACHED
+     * @event Handle#event:HANDLE_DETACHED
      * @type {Object}
      * @property {number} id - The handle identifier
      */
@@ -127,10 +125,9 @@ class Handle extends EventEmitter {
    * Helper to check if a pending transaction is a trickle.
    *
    * @private
-   * @param {string} id - The transaction identifier
-   * @returns {boolean}
+   * @param id - The transaction identifier
    */
-  _isTrickleTx(id) {
+  _isTrickleTx(id: string): boolean {
     const tx = this._tm.get(id);
     if (tx) return tx.request === JANUS.REQUEST.TRICKLE;
     return false;
@@ -140,10 +137,10 @@ class Handle extends EventEmitter {
    * Helper to check if a pending transaction is a hangup.
    *
    * @private
-   * @param {string} id - The transaction identifier
-   * @returns {boolean}
+   * @param id - The transaction identifier
+   * @returns
    */
-  _isHangupTx(id) {
+  _isHangupTx(id: string): boolean {
     const tx = this._tm.get(id);
     if (tx) return tx.request === JANUS.REQUEST.HANGUP;
     return false;
@@ -153,10 +150,10 @@ class Handle extends EventEmitter {
    * Helper to check if a pending transaction is a detach.
    *
    * @private
-   * @param {string} id - The transaction identifier
-   * @returns {boolean}
+   * @param id - The transaction identifier
+   * @returns 
    */
-  _isDetachTx(id) {
+  _isDetachTx(id: string): boolean {
     const tx = this._tm.get(id);
     if (tx) return tx.request === JANUS.REQUEST.DETACH_PLUGIN;
     return false;
@@ -170,9 +167,9 @@ class Handle extends EventEmitter {
    * Generic Janus API events like `detached`, `hangup` etc. are handled here.
    *
    * @private
-   * @param {Object} janus_message
+   * @param janus_message
    */
-  _handleMessage(janus_message) {
+  _handleMessage(janus_message: JanodeRequest): void {
     const { transaction, janus } = janus_message;
 
     /* First check if a transaction is involved */
@@ -239,7 +236,7 @@ class Handle extends EventEmitter {
     }
 
     /* Handling of a message that did not close a transaction (e.g. async events) */
-    const janode_event_data = {};
+    const janode_event_data: any = {};
     switch (janus) {
 
       /* Generic Janus event */
@@ -265,7 +262,7 @@ class Handle extends EventEmitter {
         /**
          * The handle has detected an ICE failure.
          *
-         * @event module:handle~Handle#event:HANDLE_ICE_FAILED
+         * @event Handle#event:HANDLE_ICE_FAILED
          * @type {Object}
          */
         this.emit(JANODE.EVENT.HANDLE_ICE_FAILED, janode_event_data);
@@ -279,7 +276,7 @@ class Handle extends EventEmitter {
         /**
          * The handle WebRTC connection has been closed.
          *
-         * @event module:handle~Handle#event:HANDLE_HANGUP
+         * @event Handle#event:HANDLE_HANGUP
          * @type {Object}
          * @property {string} [reason] - The reason of the hangup (e.g. ICE failed)
          */
@@ -298,7 +295,7 @@ class Handle extends EventEmitter {
         /**
          * The handle received a media notification.
          *
-         * @event module:handle~Handle#event:HANDLE_MEDIA
+         * @event Handle#event:HANDLE_MEDIA
          * @type {Object}
          * @property {string} type - The kind of media (audio/video)
          * @property {boolean} receiving - True if Janus is receiving media
@@ -315,7 +312,7 @@ class Handle extends EventEmitter {
         /**
          * The handle WebRTC connection is up.
          *
-         * @event module:handle~Handle#event:HANDLE_WEBRTCUP
+         * @event Handle#event:HANDLE_WEBRTCUP
          * @type {Object}
          */
         this.emit(JANODE.EVENT.HANDLE_WEBRTCUP, janode_event_data);
@@ -332,7 +329,7 @@ class Handle extends EventEmitter {
         /**
          * The handle has received a slowlink notification.
          *
-         * @event module:handle~Handle#event:HANDLE_SLOWLINK
+         * @event Handle#event:HANDLE_SLOWLINK
          * @type {Object}
          * @property {boolean} uplink - The direction of the slow link
          * @property {string} media - The media kind (audio/video)
@@ -358,7 +355,7 @@ class Handle extends EventEmitter {
         /**
          * The handle has received a trickle notification.
          *
-         * @event module:handle~Handle#event:HANDLE_TRICKLE
+         * @event Handle#event:HANDLE_TRICKLE
          * @type {Object}
          * @property {boolean} [completed] - If true, this notifies the end of triclking (the other fields of the event are missing in this case)
          * @property {string} [sdpMid] - The mid the candidate refers to
@@ -378,14 +375,14 @@ class Handle extends EventEmitter {
    * Decorate request with handle id and transaction (if missing).
    *
    * @private
-   * @param {Object} request
+   * @param request
    */
-  _decorateRequest(request) {
+  _decorateRequest(request: JanodeRequest) {
     request.transaction = request.transaction || getNumericID();
     request.handle_id = request.handle_id || this.id;
   }
 
-  decorateRequest(request) {
+  decorateRequest(request: JanodeRequest) {
     this._decorateRequest(request);
   }
 
@@ -393,12 +390,10 @@ class Handle extends EventEmitter {
    * Helper method used by plugins to create a new plugin event and assign it to a janus message.
    *
    * @private
-   * @param {Object} janus_message
-   * @returns {Object}
    */
-  _newPluginEvent(janus_message) {
+  _newPluginEvent(janus_message: JanusMessage): JanodeEvent {
     /* Prepare an object for the output Janode event */
-    const janode_event = {
+    const janode_event: any = {
       /* The name of the resolved event */
       event: null,
       /* The event payload */
@@ -419,10 +414,8 @@ class Handle extends EventEmitter {
    * Helper method used by plugins to get an assigned plugin eventfrom a handled janus message.
    *
    * @private
-   * @param {Object} janus_message
-   * @returns {Object}
    */
-  _getPluginEvent(janus_message) {
+  _getPluginEvent(janus_message: JanusMessage): JanodeEvent {
     return janus_message[PLUGIN_EVENT_SYM] || {};
   }
 
@@ -430,32 +423,28 @@ class Handle extends EventEmitter {
    * Stub handleMessage (it is overriden by specific plugin handlers).
    * Implementations must return falsy values for unhandled events and truthy value
    * for handled events.
-   *
-   * @param {Object} _janus_message
-   * @returns {Object}
    */
-  handleMessage(_janus_message) {
+  handleMessage(_janus_message: JanusMessage): JanodeEvent {
     return null;
   }
 
   /**
    * Helper to check if the handle is managing a specific transaction.
    *
-   * @property {string} id - The transaction id
-   * @returns {boolean} True if this handle is the owner
+   * @property id - The transaction id
+   * @returns True if this handle is the owner
    */
-  ownsTransaction(id) {
+  ownsTransaction(id: string): boolean {
     return this._tm.getTransactionOwner(id) === this;
   }
 
   /**
    * Helper to close a transaction with error.
    *
-   * @property {string} id - The transaction id
-   * @property {Error} error - The error object
-   * @returns {void}
+   * @property id - The transaction id
+   * @property error - The error object
    */
-  closeTransactionWithError(id, error) {
+  closeTransactionWithError(id: string, error: Error): void {
     this._tm.closeTransactionWithError(id, this, error);
     return;
   }
@@ -467,7 +456,7 @@ class Handle extends EventEmitter {
    * @property {Object} [data] - The callback success data
    * @returns {void}
    */
-  closeTransactionWithSuccess(id, data) {
+  closeTransactionWithSuccess(id: string, data: JanodeResponse): void {
     this._tm.closeTransactionWithSuccess(id, this, data);
     return;
   }
@@ -476,11 +465,11 @@ class Handle extends EventEmitter {
   /**
    * Send a request from this handle.
    *
-   * @param {Object} request
-   * @param {number} [timeout_ms=0]
-   * @returns {Promise<Object>} A promise resolving with the response to the request
+   * @param request
+   * @param [timeout_ms=0]
+   * @returns A promise resolving with the response to the request
    */
-  async sendRequest(request, timeout_ms = 0) {
+  async sendRequest(request: JanodeRequest, timeout_ms: number = 0): Promise<JanodeResponse> {
     /* Input check */
     if (typeof request !== 'object' || !request) {
       const error = new Error('request must be an object');
@@ -498,7 +487,7 @@ class Handle extends EventEmitter {
     /* Add handle properties */
     this._decorateRequest(request);
 
-    return new Promise((resolve, reject) => {
+    return new Promise<PendingTransaction>((resolve, reject) => {
       /* Create a new transaction if the transaction does not exist */
       /* Use promise resolve and reject fn as callbacks for the transaction */
       this._tm.createTransaction(request.transaction, this, request.janus, resolve, reject, timeout_ms);
@@ -513,10 +502,8 @@ class Handle extends EventEmitter {
 
   /**
    * Gracefully detach the Handle.
-   *
-   * @returns {Promise<void>}
    */
-  async detach() {
+  async detach(): Promise<void> {
     if (this._detaching) {
       const error = new Error('detaching already in progress');
       Logger.verbose(`${LOG_NS} ${this.name} ${error.message}`);
@@ -539,18 +526,18 @@ class Handle extends EventEmitter {
       this._signalDetach();
       return;
     }
-    catch ({ message }) {
+    catch (error) {
       this._detaching = false;
-      Logger.error(`${LOG_NS} ${this.name} error while detaching (${message})`);
+      Logger.error(`${LOG_NS} ${this.name} error while detaching (${(error as Error).message})`);
     }
   }
 
   /**
    * Close the peer connection associated to this handle.
    *
-   * @returns {Promise<Object>}
+   * @returns
    */
-  async hangup() {
+  async hangup(): Promise<JanodeResponse> {
     const request = {
       janus: JANUS.REQUEST.HANGUP,
     };
@@ -559,18 +546,15 @@ class Handle extends EventEmitter {
       return this.sendRequest(request);
     }
     catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} error while hanging up (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} error while hanging up (${(error as Error).message})`);
       throw error;
     }
   }
 
   /**
    * Send an ICE candidate / array of candidates.
-   *
-   * @param {RTCIceCandidate|RTCIceCandidate[]} candidate
-   * @returns {Promise<void>}
    */
-  async trickle(candidate) {
+  async trickle(candidate: RTCIceCandidate | RTCIceCandidate[] | { completed: true }): Promise<void> {
     /* If candidate is null or undefined, send an ICE trickle complete message */
     if (!candidate) return this.trickleComplete();
 
@@ -581,7 +565,7 @@ class Handle extends EventEmitter {
       throw error;
     }
 
-    const request = {
+    const request: any = {
       janus: JANUS.REQUEST.TRICKLE
     };
 
@@ -594,9 +578,9 @@ class Handle extends EventEmitter {
     }
 
     try {
-      return this.sendRequest(request);
+      return this.sendRequest(request) as Promise<void>;
     } catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} error on trickle (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} error on trickle (${(error as Error).message})`);
       throw error;
     }
   }
@@ -606,7 +590,7 @@ class Handle extends EventEmitter {
    *
    * @returns {Promise<void>}
    */
-  async trickleComplete() {
+  async trickleComplete(): Promise<void> {
     return this.trickle({
       completed: true
     });
@@ -615,9 +599,9 @@ class Handle extends EventEmitter {
   /**
    * Send a `message` to Janus from this handle, with given body and optional jsep.
    *
-   * @param {Object} body - The body of the message
-   * @param {RTCSessionDescription} [jsep]
-   * @returns {Promise<Object>} A promise resolving with the response to the message
+   * @param body - The body of the message
+   * @param [jsep]
+   * @returns A promise resolving with the response to the message
    *
    * @example
    * // This is a plugin that sends a message with a custom body
@@ -630,8 +614,8 @@ class Handle extends EventEmitter {
    * await handle.message(body, jsep);
    *
    */
-  async message(body, jsep) {
-    const request = {
+  async message(body: any, jsep?: RTCSessionDescription): Promise<JanodeResponse> {
+    const request: any = {
       janus: JANUS.REQUEST.MESSAGE,
       body,
     };
@@ -641,7 +625,7 @@ class Handle extends EventEmitter {
       return this.sendRequest(request);
     }
     catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} error on message (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} error on message (${(error as Error).message})`);
       throw error;
     }
   }

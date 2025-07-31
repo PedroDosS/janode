@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * This module contains the Session class definition.
  * @module session
@@ -8,11 +6,19 @@
 
 import { EventEmitter } from 'events';
 
-import Logger from './utils/logger.js';
-const LOG_NS = '[session.js]';
-import { getNumericID } from './utils/utils.js';
-import { JANUS, JANODE, isTimeoutData, isResponseData, isErrorData } from './protocol.js';
-import JanodeHandle from './handle.js';
+import Logger from './utils/logger.ts';
+const LOG_NS = '[session.ts]';
+import { getNumericID } from './utils/utils.ts';
+import { JANUS, JANODE, isTimeoutData, isResponseData, isErrorData } from './protocol.ts';
+import JanodeHandle from './handle.ts';
+
+import Connection from './connection.ts';
+import Handle from './handle.ts';
+import TransactionManager from './tmanager.ts';
+
+import type { PluginDescriptor } from './janode.ts';
+import type { JanodeRequest, JanodeResponse, JanusMessage } from './handle.ts'
+import type { TransactionOwner } from './tmanager.ts';
 
 /**
  * Class representing a Janode session.<br>
@@ -23,75 +29,65 @@ import JanodeHandle from './handle.js';
  *
  * @hideconstructor
  */
-class Session extends EventEmitter {
+class Session extends EventEmitter implements TransactionOwner {
+  _tm: TransactionManager; // Meant to be private but used within handle.ts
+  private _destroying: boolean;
+  private _destroyed: boolean;
+  private _handles: Map<string | number, Handle>;
+  private _ka_task: NodeJS.Timeout | null;
+  connection: Connection;
+  id: number;
+  name: string;
+  private _closedListener: () => void;
+  private _errorListener: () => void;
   /**
    * Create a Janode session.
    *
-   * @param {module:connection~Connection} connection - A reference to the parent connection
-   * @param {number} id - The session identifier
-   * @param {number} [ka_interval=30] - The keepalive interval in seconds
+   * @param connection - A reference to the parent connection
+   * @param id - The session identifier
+   * @param [ka_interval=30] - The keepalive interval in seconds
    */
-  constructor(connection, id, ka_interval = 30) {
+  constructor(connection: Connection, id: number, ka_interval: number = 30) {
     super();
 
     /**
      * The transaction manager used by this session.
-     *
-     * @private
-     * @type {module:tmanager~TransactionManager}
      */
     this._tm = connection._tm;
 
     /**
      * A boolean flag indicating that the session is being destroyed.
      * Once the destroy has been completed, the flag returns to false.
-     *
-     * @private
-     * @type {boolean}
      */
     this._destroying = false;
 
     /**
      * A boolean flag indicating that the session has been destroyed.
-     *
-     * @private
-     * @type {boolean}
      */
     this._destroyed = false;
 
     /**
      * Keep track of the handles.
-     *
-     * @private
-     * @type {Map}
      */
     this._handles = new Map(); // keep track of the handles
 
     /**
      * The task of the peridic keep-alive.
-     *
-     * @private
      */
     this._ka_task = null;
 
     /**
      * The parent Janode connection.
-     *
-     * @type {module:connection~Connection}
      */
     this.connection = connection;
 
     /**
      * The session unique id, usually taken from Janus response.
-     *
-     * @type {number}
      */
     this.id = id;
 
     /**
      * A more descriptive, not unique string (used for logging).
-     *
-     * @type {string}
      */
     this.name = `[${this.id}]`;
 
@@ -100,15 +96,11 @@ class Session extends EventEmitter {
 
     /**
      * The callback function used for a connection closed event.
-     *
-     * @private
      */
     this._closedListener = this._signalDestroy.bind(this);
 
     /**
      * The callback function used for a connection error event.
-     *
-     * @private
      */
     this._errorListener = this._signalDestroy.bind(this);
 
@@ -126,7 +118,7 @@ class Session extends EventEmitter {
    *
    * @private
    */
-  _signalDestroy() {
+  _signalDestroy(): void {
     if (this._destroyed) return;
     this._destroying = false;
     this._destroyed = true;
@@ -144,7 +136,7 @@ class Session extends EventEmitter {
     /**
      * The session has been destroyed.
      *
-     * @event module:session~Session#event:SESSION_DESTROYED
+     * @event Session#event:SESSION_DESTROYED
      * @property {number} id - The session identifier
      */
     this.emit(JANODE.EVENT.SESSION_DESTROYED, { id: this.id });
@@ -157,17 +149,16 @@ class Session extends EventEmitter {
    * The returned promise will return upon keep-alive response or a wait timeout.
    *
    * @private
-   * @param {number} timeout - The timeout in milliseconds before detecting a ka timeout
-   * @returns {Promise<void>}
+   * @param timeout - The timeout in milliseconds before detecting a ka timeout
    */
-  async _sendKeepAlive(timeout) {
+  async _sendKeepAlive(timeout: number): Promise<void> {
     const request = {
       janus: JANUS.REQUEST.KEEPALIVE,
     };
 
-    let timeout_task;
-    const timeout_ka = new Promise((_, reject) => {
-      timeout_task = setTimeout(_ => reject(new Error('timeout')), timeout);
+    let timeout_task: NodeJS.Timeout;
+    const timeout_ka = new Promise<void>((_, reject) => {
+      timeout_task = setTimeout(() => reject(new Error('timeout')), timeout);
     });
 
     Logger.verbose(`${LOG_NS} ${this.name} sending keep-alive (timeout=${timeout}ms)`);
@@ -187,13 +178,13 @@ class Session extends EventEmitter {
    * Helper method to enable the keep-alive task with a given period.
    *
    * @private
-   * @param {number} delay - The period of the task in milliseconds
+   * @param delay - The period of the task in milliseconds
    */
-  _setKeepAlive(delay) {
+  _setKeepAlive(delay: number): void {
     if (this._ka_task) return;
     const timeout = delay / 2;
 
-    this._ka_task = setInterval(_ => {
+    this._ka_task = setInterval(() => {
       this._sendKeepAlive(timeout).catch(({ message }) => {
         /* If a keep-alive fails destroy the session */
         if (!this._destroyed) {
@@ -212,7 +203,7 @@ class Session extends EventEmitter {
    *
    * @private
    */
-  _unsetKeepAlive() {
+  _unsetKeepAlive(): void {
     if (!this._ka_task) return;
     clearInterval(this._ka_task);
     this._ka_task = null;
@@ -223,10 +214,9 @@ class Session extends EventEmitter {
    * Helper to check if a pending transaction is a keep-alive.
    *
    * @private
-   * @param {string} id - The transaction identifier
-   * @returns {boolean}
+   * @param id - The transaction identifier
    */
-  _isKeepaliveTx(id) {
+  _isKeepaliveTx(id: string): boolean {
     const tx = this._tm.get(id);
     if (tx) return (tx.request === JANUS.REQUEST.KEEPALIVE);
     return false;
@@ -239,9 +229,8 @@ class Session extends EventEmitter {
    * the transaction will be closed.
    *
    * @private
-   * @param {Object} janus_message
    */
-  _handleMessage(janus_message) {
+  _handleMessage(janus_message: JanusMessage): void {
     const { sender, janus, transaction } = janus_message;
 
     /* First check if a handle is involved */
@@ -324,20 +313,16 @@ class Session extends EventEmitter {
    * Decorate request with session id and transaction (if missing).
    *
    * @private
-   * @param {Object} request
    */
-  _decorateRequest(request) {
+  _decorateRequest(request: Partial<JanodeRequest>): void {
     request.transaction = request.transaction || getNumericID();
     request.session_id = request.session_id || this.id;
   }
 
   /**
    * Send a request from this session.
-   *
-   * @param {Object} request
-   * @returns {Promise<Object>} A promise resolving with the response
    */
-  async sendRequest(request) {
+  async sendRequest(request: JanodeRequest): Promise<JanodeResponse> {
     /* Input check */
     if (typeof request !== 'object' || !request) {
       const error = new Error('request must be an object');
@@ -355,25 +340,23 @@ class Session extends EventEmitter {
     /* Add session properties */
     this._decorateRequest(request);
 
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       /* Create a new transaction if the transaction does not exist */
       /* Use promise resolve and reject fn as callbacks for the transaction */
-      this._tm.createTransaction(request.transaction, this, request.janus, resolve, reject);
+      this._tm.createTransaction(request.transaction!, this, request.janus, resolve, reject);
 
       /* Send this message through the parent janode connection */
       this.connection.sendRequest(request).catch(error => {
         /* In case of error quickly close the transaction */
-        this._tm.closeTransactionWithError(request.transaction, this, error);
+        this._tm.closeTransactionWithError(request.transaction!, this, error);
       });
     });
   }
 
   /**
    * Gracefully destroy the session.
-   *
-   * @returns {Promise<void>}
    */
-  async destroy() {
+  async destroy(): Promise<void> {
     Logger.info(`${LOG_NS} ${this.name} destroying session`);
     if (this._destroying) {
       const error = new Error('destroying already in progress');
@@ -397,7 +380,7 @@ class Session extends EventEmitter {
       return;
     }
     catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} error while destroying session (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} error while destroying session (${(error as Error).message})`);
       this._destroying = false;
       throw error;
     }
@@ -408,20 +391,19 @@ class Session extends EventEmitter {
    * If the Handle param is missing, a new generic Handle will be attached.
    * Returns a promise with the pending attach operation.
    *
-   * @param {module:janode~PluginDescriptor} descriptor - The plugin descriptor
-   * @returns {Promise<module:handle~Handle>}
+   * @param descriptor - The plugin descriptor
    *
    * @example
    *
    * // attach an echotest plugin with its specifc class
-   * import EchoTestPlugin from 'janode/src/plugins/echotest-plugin.js';
+   * import EchoTestPlugin from 'janode/src/plugins/echotest-plugin.ts';
    * const echoHandle = await janodeSession.attach(EchoTestPlugin);
    *
    * // attach a plugin without using its custom implementation
    * const handle = await session.attach({ id: 'janus.plugin.echotest' });
    *
    */
-  async attach({ id, Handle = JanodeHandle }) {
+  async attach<T extends Handle = Handle>({ id, Handle }: PluginDescriptor<T>): Promise<T> {
     Logger.info(`${LOG_NS} ${this.name} attaching new handle`);
 
     if (!id) {
@@ -442,7 +424,7 @@ class Session extends EventEmitter {
 
       /* If the plugin Handle class is defined, use it to create a custom handle */
       /* Or simply create a generic handle with standard methods and events */
-      const handle_instance = new Handle(this, data.id);
+      const handle_instance = new (Handle ?? JanodeHandle)(this, data.id);
 
       /* Add the new handle to the table */
       this._handles.set(handle_instance.id, handle_instance);
@@ -454,10 +436,10 @@ class Session extends EventEmitter {
       });
 
       Logger.info(`${LOG_NS} ${this.name} handle attached (id=${handle_instance.id})`);
-      return handle_instance;
+      return handle_instance as T;
     }
     catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} handle attach error (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} handle attach error (${(error as Error).message})`);
       throw error;
     }
   }

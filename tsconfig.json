@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "strict": true,
+        "alwaysStrict": true,
+        "strictNullChecks": true,
+        "noFallthroughCasesInSwitch": true,
+        "target": "ESNext",
+        "module": "NodeNext",
+        "moduleResolution": "nodenext",
+        "allowSyntheticDefaultImports": true,
+        "esModuleInterop": true,
+        "jsx": "preserve",
+        "isolatedModules": true,
+        "sourceMap": true,
+        "allowJs": true,
+        "declaration": true,
+        "emitDeclarationOnly": true,
+        "outDir": "dist",
+        "declarationMap": true,
+        "allowImportingTsExtensions": true
+    }
+}

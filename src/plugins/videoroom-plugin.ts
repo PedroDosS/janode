@@ -1,11 +1,14 @@
-'use strict';
+//@ts-nocheck
 
 /**
  * This module contains the implementation of the VideoRoom plugin (ref. {@link https://janus.conf.meetecho.com/docs/videoroom.html}).
  * @module videoroom-plugin
  */
 
-import Handle from '../handle.js';
+import Handle from '../handle.ts';
+import Session from '../session.ts';
+
+import type { JanodeEvent, JanusMessage } from '../handle.ts'
 
 /* The plugin ID exported in the plugin descriptor */
 const PLUGIN_ID = 'janus.plugin.videoroom';
@@ -80,37 +83,34 @@ const PLUGIN_EVENT = {
  * Moreover it defines many methods to support VideoRoom operations.<br>
  *
  * @hideconstructor
- * @extends module:handle~Handle
+ * @extends Handle
  */
-class VideoRoomHandle extends Handle {
+export class VideoRoomHandle extends Handle {
+  feed: number | string | null;
+  streams: null;
+  room: number | string | null;
   /**
    * Create a Janode VideoRoom handle.
    *
-   * @param {module:session~Session} session - A reference to the parent session
-   * @param {number} id - The handle identifier
+   * @param session - A reference to the parent session
+   * @param id - The handle identifier
    */
-  constructor(session, id) {
+  constructor(session: Session, id: number) {
     super(session, id);
 
     /**
      * Either the feed identifier assigned to this publisher handle or the publisher's feed in case this handle is a subscriber.
-     *
-     * @type {number|string}
      */
     this.feed = null;
 
     /**
      * [multistream]
      * Either the streams assigned to this publisher handle or the streams subscribed to in case this handle is a subscriber.
-     *
-     * @type {object[]}
      */
     this.streams = null;
 
     /**
      * The identifier of the videoroom the handle has joined.
-     *
-     * @type {number|string}
      */
     this.room = null;
   }
@@ -119,10 +119,10 @@ class VideoRoomHandle extends Handle {
    * The custom "handleMessage" needed for handling VideoRoom messages.
    *
    * @private
-   * @param {Object} janus_message
-   * @returns {Object} A falsy value for unhandled events, a truthy value for handled events
+   * @param janus_message
+   * @returns A falsy value for unhandled events, a truthy value for handled events
    */
-  handleMessage(janus_message) {
+  handleMessage(janus_message: JanusMessage): JanodeEvent {
     const { plugindata, transaction } = janus_message;
     if (plugindata && plugindata.data && plugindata.data.videoroom) {
       /**
@@ -615,22 +615,21 @@ class VideoRoomHandle extends Handle {
   /**
    * Join a videoroom as publisher.
    *
-   * @param {Object} params
-   * @param {number|string} params.room - The room to join to
-   * @param {number|string} [params.feed] - The feed identifier to use, if missing it is picked by Janus
-   * @param {boolean} [params.audio] - True to request audio relaying
-   * @param {boolean} [params.video] - True to request video relaying
-   * @param {boolean} [params.data] - True to request datachannel relaying
-   * @param {string} [params.display] - The display name to use
-   * @param {number} [params.bitrate] - Bitrate cap
-   * @param {string} [params.token] - The optional token needed to join the room
-   * @param {string} [params.pin] - The optional pin needed to join the room
-   * @param {boolean} [params.record] - Enable the recording
-   * @param {string} [params.filename] - If recording, the base path/file to use for the recording
-   * @param {object[]} [params.descriptions] - [multistream] The descriptions object, can define a description for the tracks separately e.g. track mid:0 'Video Camera', track mid:1 'Screen'
-   * @returns {Promise<module:videoroom-plugin~VIDEOROOM_EVENT_PUB_JOINED>}
+   * @param params
+   * @param params.room - The room to join to
+   * @param [params.feed] - The feed identifier to use, if missing it is picked by Janus
+   * @param [params.audio] - True to request audio relaying
+   * @param [params.video] - True to request video relaying
+   * @param [params.data] - True to request datachannel relaying
+   * @param [params.display] - The display name to use
+   * @param [params.bitrate] - Bitrate cap
+   * @param [params.token] - The optional token needed to join the room
+   * @param [params.pin] - The optional pin needed to join the room
+   * @param [params.record] - Enable the recording
+   * @param [params.filename] - If recording, the base path/file to use for the recording
+   * @param [params.descriptions] - [multistream] The descriptions object, can define a description for the tracks separately e.g. track mid:0 'Video Camera', track mid:1 'Screen'
    */
-  async joinPublisher({ room, feed, audio, video, data, bitrate, record, filename, display, token, pin, descriptions }) {
+  async joinPublisher({ room, feed, audio, video, data, bitrate, record, filename, display, token, pin, descriptions }: { room: number | string; feed?: number | string; audio?: boolean; video?: boolean; data?: boolean; display?: string; bitrate?: number; token?: string; pin?: string; record?: boolean; filename?: string; descriptions?: object[]; }): Promise<VIDEOROOM_EVENT_PUB_JOINED> {
     const body = {
       request: REQUEST_JOIN,
       ptype: PTYPE_PUBLISHER,
@@ -740,27 +739,27 @@ class VideoRoomHandle extends Handle {
    * restart/update flags, while subscribers need to use them to force
    * the operation.
    *
-   * @param {Object} params
-   * @param {boolean} [params.audio] - True to request audio relaying
-   * @param {boolean} [params.video] - True to request video relaying
-   * @param {boolean} [params.data] - True to request datachannel relaying
-   * @param {string} [params.display] - The display name to use (publishers only)
-   * @param {number} [params.bitrate] - Bitrate cap (publishers only)
-   * @param {boolean} [params.record] - True to record the feed (publishers only)
-   * @param {string} [params.filename] - If recording, the base path/file to use for the recording (publishers only)
-   * @param {boolean} [params.restart] - Set to force a ICE restart
-   * @param {boolean} [params.update] - Set to force a renegotiation
-   * @param {object[]} [params.streams] - [multistream] The streams object, each stream includes mid, keyframe, send, min_delay, max_delay
-   * @param {object[]} [params.descriptions] - [multistream] The descriptions object, can define a description for the tracks separately e.g. track mid:0 'Video Camera', track mid:1 'Screen'
-   * @param {number} [params.sc_substream_layer] - Substream layer to receive (0-2), in case simulcasting is enabled (subscribers only)
-   * @param {number} [params.sc_substream_fallback_ms] - How much time in ms without receiving packets will make janus drop to the substream below (subscribers only)
-   * @param {number} [params.sc_temporal_layers] - Temporal layers to receive (0-2), in case VP8 simulcasting is enabled (subscribers only)
-   * @param {boolean} [params.e2ee] - True to notify end-to-end encryption for this connection
-   * @param {RTCSessionDescription} [params.jsep] - The JSEP offer (publishers only)
-   * @param {boolean} [params.keyframe] - True to request a keyframe (publishers only)
-   * @returns {Promise<module:videoroom-plugin~VIDEOROOM_EVENT_CONFIGURED>}
+   * @param params
+   * @param [params.audio] - True to request audio relaying
+   * @param [params.video] - True to request video relaying
+   * @param [params.data] - True to request datachannel relaying
+   * @param [params.display] - The display name to use (publishers only)
+   * @param [params.bitrate] - Bitrate cap (publishers only)
+   * @param [params.record] - True to record the feed (publishers only)
+   * @param [params.filename] - If recording, the base path/file to use for the recording (publishers only)
+   * @param [params.restart] - Set to force a ICE restart
+   * @param [params.update] - Set to force a renegotiation
+   * @param [params.streams] - [multistream] The streams object, each stream includes mid, keyframe, send, min_delay, max_delay
+   * @param [params.descriptions] - [multistream] The descriptions object, can define a description for the tracks separately e.g. track mid:0 'Video Camera', track mid:1 'Screen'
+   * @param [params.sc_substream_layer] - Substream layer to receive (0-2), in case simulcasting is enabled (subscribers only)
+   * @param [params.sc_substream_fallback_ms] - How much time in ms without receiving packets will make janus drop to the substream below (subscribers only)
+   * @param [params.sc_temporal_layers] - Temporal layers to receive (0-2), in case VP8 simulcasting is enabled (subscribers only)
+   * @param [params.e2ee] - True to notify end-to-end encryption for this connection
+   * @param [params.jsep] - The JSEP offer (publishers only)
+   * @param [params.keyframe] - True to request a keyframe (publishers only)
    */
-  async configure({ audio, video, data, bitrate, record, filename, display, restart, update, streams, descriptions, sc_substream_layer, sc_substream_fallback_ms, sc_temporal_layers, e2ee, jsep, keyframe }) {
+  // TODO: I changed it to RTCSessionDescriptionInit
+  async configure({ audio, video, data, bitrate, record, filename, display, restart, update, streams, descriptions, sc_substream_layer, sc_substream_fallback_ms, sc_temporal_layers, e2ee, jsep, keyframe }: { audio?: boolean; video?: boolean; data?: boolean; display?: string; bitrate?: number; record?: boolean; filename?: string; restart?: boolean; update?: boolean; streams?: object[]; descriptions?: object[]; sc_substream_layer?: number; sc_substream_fallback_ms?: number; sc_temporal_layers?: number; e2ee?: boolean; jsep?: RTCSessionDescriptionInit; keyframe?: boolean; }): Promise<VIDEOROOM_EVENT_CONFIGURED> {
     const body = {
       request: REQUEST_CONFIGURE,
     };
@@ -826,20 +825,19 @@ class VideoRoomHandle extends Handle {
    * Publish a feed in the room.
    * Room is detected from the context since a handle must have joined before.
    *
-   * @param {Object} params
-   * @param {boolean} [params.audio] - True to request audio relaying
-   * @param {boolean} [params.video] - True to request video relaying
-   * @param {boolean} [params.data] - True to request datachannel relaying
-   * @param {string} [params.display] - The display name to use
-   * @param {number} [params.bitrate] - Bitrate cap
-   * @param {boolean} [params.record] - True to record the feed
-   * @param {string} [params.filename] - If recording, the base path/file to use for the recording
-   * @param {object[]} [params.descriptions] - [multistream] The descriptions object, for each stream you can define description
-   * @param {boolean} [params.e2ee] - True to notify end-to-end encryption for this connection
-   * @param {RTCSessionDescription} params.jsep - The JSEP offer
-   * @returns {Promise<module:videoroom-plugin~VIDEOROOM_EVENT_CONFIGURED>}
+   * @param params
+   * @param [params.audio] - True to request audio relaying
+   * @param [params.video] - True to request video relaying
+   * @param [params.data] - True to request datachannel relaying
+   * @param [params.display] - The display name to use
+   * @param [params.bitrate] - Bitrate cap
+   * @param [params.record] - True to record the feed
+   * @param [params.filename] - If recording, the base path/file to use for the recording
+   * @param [params.descriptions] - [multistream] The descriptions object, for each stream you can define description
+   * @param [params.e2ee] - True to notify end-to-end encryption for this connection
+   * @param params.jsep - The JSEP offer
    */
-  async publish({ audio, video, data, bitrate, record, filename, display, descriptions, e2ee, jsep }) {
+  async publish({ audio, video, data, bitrate, record, filename, display, descriptions, e2ee, jsep }: { audio?: boolean; video?: boolean; data?: boolean; display?: string; bitrate?: number; record?: boolean; filename?: string; descriptions?: object[]; e2ee?: boolean; jsep: RTCSessionDescription; }): Promise<VIDEOROOM_EVENT_CONFIGURED> {
     if (typeof jsep === 'object' && jsep && jsep.type !== 'offer') {
       const error = new Error('jsep must be an offer');
       return Promise.reject(error);
@@ -914,27 +912,26 @@ class VideoRoomHandle extends Handle {
   /**
    * Join a room as subscriber.
    *
-   * @param {Object} params
-   * @param {number|string} params.room - The room to join
-   * @param {number|string} [params.feed=0] - The feed the user wants to subscribe to
-   * @param {boolean} [params.audio] - Whether or not audio should be relayed
-   * @param {boolean} [params.video] - Whether or not video should be relayed
-   * @param {boolean} [params.data] - Whether or not data should be relayed
-   * @param {boolean} [params.offer_audio] - Whether or not audio should be negotiated
-   * @param {boolean} [params.offer_video] - Whether or not video should be negotiated
-   * @param {boolean} [params.offer_data] - Whether or not data should be negotiated
-   * @param {number} [params.private_id] - The private id to correlate with publisher
-   * @param {number} [params.sc_substream_layer] - Substream layer to receive (0-2), in case simulcasting is enabled
-   * @param {number} [params.sc_substream_fallback_ms] - How much time in ms without receiving packets will make janus drop to the substream below
-   * @param {number} [params.sc_temporal_layers] - Temporal layers to receive (0-2), in case VP8 simulcasting is enabled
-   * @param {object[]} [params.streams] - [multistream] The streams object, each stream includes feed, mid, send, ...
-   * @param {boolean} [params.autoupdate] - [multistream] Whether a new SDP offer is sent automatically when a subscribed publisher leaves
-   * @param {boolean} [params.use_msid] - [multistream] Whether subscriptions should include an msid that references the publisher
-   * @param {string} [params.token] - The optional token needed
-   * @param {string} [params.pin] - The optional password required to join the room
-   * @returns {Promise<module:videoroom-plugin~VIDEOROOM_EVENT_SUB_JOINED>}
+   * @param params
+   * @param string} params.room - The room to join
+   * @param string} [params.feed=0] - The feed the user wants to subscribe to
+   * @param [params.audio] - Whether or not audio should be relayed
+   * @param [params.video] - Whether or not video should be relayed
+   * @param [params.data] - Whether or not data should be relayed
+   * @param [params.offer_audio] - Whether or not audio should be negotiated
+   * @param [params.offer_video] - Whether or not video should be negotiated
+   * @param [params.offer_data] - Whether or not data should be negotiated
+   * @param [params.private_id] - The private id to correlate with publisher
+   * @param [params.sc_substream_layer] - Substream layer to receive (0-2), in case simulcasting is enabled
+   * @param [params.sc_substream_fallback_ms] - How much time in ms without receiving packets will make janus drop to the substream below
+   * @param [params.sc_temporal_layers] - Temporal layers to receive (0-2), in case VP8 simulcasting is enabled
+   * @param [params.streams] - [multistream] The streams object, each stream includes feed, mid, send, ...
+   * @param [params.autoupdate] - [multistream] Whether a new SDP offer is sent automatically when a subscribed publisher leaves
+   * @param [params.use_msid] - [multistream] Whether subscriptions should include an msid that references the publisher
+   * @param [params.token] - The optional token needed
+   * @param [params.pin] - The optional password required to join the room
    */
-  async joinSubscriber({ room, feed, audio, video, data, offer_audio, offer_video, offer_data, private_id, sc_substream_layer, sc_substream_fallback_ms, sc_temporal_layers, streams, autoupdate, use_msid, token, pin }) {
+  async joinSubscriber({ room, feed, audio, video, data, offer_audio, offer_video, offer_data, private_id, sc_substream_layer, sc_substream_fallback_ms, sc_temporal_layers, streams, autoupdate, use_msid, token, pin }: { room: number | string; feed?: number | string; audio?: boolean; video?: boolean; data?: boolean; offer_audio?: boolean; offer_video?: boolean; offer_data?: boolean; private_id?: number; sc_substream_layer?: number; sc_substream_fallback_ms?: number; sc_temporal_layers?: number; streams?: object[]; autoupdate?: boolean; use_msid?: boolean; token?: string; pin?: string; }): Promise<VIDEOROOM_EVENT_SUB_JOINED> {
     const body = {
       request: REQUEST_JOIN,
       ptype: PTYPE_LISTENER,
@@ -976,21 +973,21 @@ class VideoRoomHandle extends Handle {
   /**
    * Alias for "joinSubscriber".
    *
-   * @see module:videoroom-plugin~VideoRoomHandle#joinSubscriber
+   * @see VideoRoomHandle#joinSubscriber
    */
-  async joinListener(params) {
+  async joinListener(params): Promise<VIDEOROOM_EVENT_SUB_JOINED> {
     return this.joinSubscriber(params);
   }
 
   /**
    * Start a subscriber stream.
    *
-   * @param {Object} params
-   * @param {RTCSessionDescription} params.jsep - The JSEP answer
-   * @param {boolean} [params.e2ee] - True to hint an end-to-end encrypted negotiation
-   * @returns {Promise<module:videoroom-plugin~VIDEOROOM_EVENT_STARTED>}
+   * @param params
+   * @param params.jsep - The JSEP answer
+   * @param [params.e2ee] - True to hint an end-to-end encrypted negotiation
    */
-  async start({ jsep, e2ee }) {
+  // TODO: I changed it to RTCsessionDescriptionInit
+  async start({ jsep, e2ee }: { jsep: RTCSessionDescriptionInit; e2ee?: boolean; }): Promise<VIDEOROOM_EVENT_STARTED> {
     const body = {
       request: REQUEST_START,
     };
@@ -1232,37 +1229,36 @@ class VideoRoomHandle extends Handle {
   /**
    * Create a new room.
    *
-   * @param {Object} params
-   * @param {number|string} [params.room] - The room identifier, if missing picked by janus
-   * @param {string} [params.description] - A textual description of the room
-   * @param {number} [params.max_publishers] - The max number of publishers allowed
-   * @param {boolean} [params.permanent] - True to make Janus persist the room on th config file
-   * @param {boolean} [params.is_private] - Make the room private (hidden from listing)
-   * @param {string} [params.secret] - The secret that will be used to modify the room
-   * @param {string} [params.pin] - The pin needed to access the room
-   * @param {string} [params.admin_key] - The admin key needed for invoking the API
-   * @param {number} [params.bitrate] - The bitrate cap that will be used for publishers
-   * @param {boolean} [params.bitrate_cap] - Make the bitrate cap an insormountable limit
-   * @param {number} [params.fir_freq] - The PLI interval in seconds
-   * @param {string} [params.audiocodec] - Comma separated list of allowed audio codecs
-   * @param {string} [params.videocodec] - Comma separated list of allowed video codecs
-   * @param {boolean} [params.talking_events] - True to enable talking events
-   * @param {number} [params.talking_level_threshold] - Audio level threshold for talking events in the range [0, 127]
-   * @param {number} [params.talking_packets_threshold] - Audio packets threshold for talking events
-   * @param {boolean} [params.require_pvtid] - Whether subscriptions are required to provide a valid private_id
-   * @param {boolean} [params.notify_joining] - Whether to notify all participants when a new participant joins the room
-   * @param {boolean} [params.require_e2ee] - Whether all participants are required to publish and subscribe using e2e encryption
-   * @param {boolean} [params.record] - Wheter to enable recording of any publisher
-   * @param {string} [params.rec_dir] - Folder where recordings should be stored
-   * @param {boolean} [params.videoorient] - Whether the video-orientation RTP extension must be negotiated
-   * @param {string} [params.h264_profile] - H264 specific profile to prefer
-   * @param {string} [params.vp9_profile] - VP9 specific profile to prefer
-   * @param {number} [params.threads] - Number of threads to assist with the relaying of publishers in the room
-   * @returns {Promise<module:videoroom-plugin~VIDEOROOM_EVENT_CREATED>}
+   * @param params
+   * @param [params.room] - The room identifier, if missing picked by janus
+   * @param [params.description] - A textual description of the room
+   * @param [params.max_publishers] - The max number of publishers allowed
+   * @param [params.permanent] - True to make Janus persist the room on th config file
+   * @param [params.is_private] - Make the room private (hidden from listing)
+   * @param [params.secret] - The secret that will be used to modify the room
+   * @param [params.pin] - The pin needed to access the room
+   * @param [params.admin_key] - The admin key needed for invoking the API
+   * @param [params.bitrate] - The bitrate cap that will be used for publishers
+   * @param [params.bitrate_cap] - Make the bitrate cap an insormountable limit
+   * @param [params.fir_freq] - The PLI interval in seconds
+   * @param [params.audiocodec] - Comma separated list of allowed audio codecs
+   * @param [params.videocodec] - Comma separated list of allowed video codecs
+   * @param [params.talking_events] - True to enable talking events
+   * @param [params.talking_level_threshold] - Audio level threshold for talking events in the range [0, 127]
+   * @param [params.talking_packets_threshold] - Audio packets threshold for talking events
+   * @param [params.require_pvtid] - Whether subscriptions are required to provide a valid private_id
+   * @param [params.notify_joining] - Whether to notify all participants when a new participant joins the room
+   * @param [params.require_e2ee] - Whether all participants are required to publish and subscribe using e2e encryption
+   * @param [params.record] - Wheter to enable recording of any publisher
+   * @param [params.rec_dir] - Folder where recordings should be stored
+   * @param [params.videoorient] - Whether the video-orientation RTP extension must be negotiated
+   * @param [params.h264_profile] - H264 specific profile to prefer
+   * @param [params.vp9_profile] - VP9 specific profile to prefer
+   * @param [params.threads] - Number of threads to assist with the relaying of publishers in the room
    */
   async create({ room, description, max_publishers, permanent, is_private, secret, pin, admin_key, bitrate,
     bitrate_cap, fir_freq, audiocodec, videocodec, talking_events, talking_level_threshold, talking_packets_threshold,
-    require_pvtid, notify_joining, require_e2ee, record, rec_dir, videoorient, h264_profile, vp9_profile, threads }) {
+    require_pvtid, notify_joining, require_e2ee, record, rec_dir, videoorient, h264_profile, vp9_profile, threads }: { room?: number | string; description?: string; max_publishers?: number; permanent?: boolean; is_private?: boolean; secret?: string; pin?: string; admin_key?: string; bitrate?: number; bitrate_cap?: boolean; fir_freq?: number; audiocodec?: string; videocodec?: string; talking_events?: boolean; talking_level_threshold?: number; talking_packets_threshold?: number; require_pvtid?: boolean; notify_joining?: boolean; require_e2ee?: boolean; record?: boolean; rec_dir?: string; videoorient?: boolean; h264_profile?: string; vp9_profile?: string; threads?: number; }): Promise<VIDEOROOM_EVENT_CREATED> {
     const body = {
       request: REQUEST_CREATE,
     };

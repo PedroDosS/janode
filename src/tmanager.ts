@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * This module contains the transaction manager used by janode.
  * It is possible to debug the size of the transaction table (to detect leaks) by using the CLI argument `--debug-tx`.
@@ -7,22 +5,36 @@
  * @private
  */
 
+// TODO: It seems like some owners have a numeric string, and others just have a number.
+// I should probably make sure this is correct
+export type TransactionOwner = { id: string | number }
+export type Response = any
+
+
 /**
  * An object describing a pending transaction stored in the manager.
  *
- * @typedef {Object} PendingTransaction
- * @property {string} id - The transaction identifier
- * @property {Object} owner - A reference to the object that created the transaction
- * @property {string} request - The janus request for the pending transaction
- * @property {function} done - The success callback
- * @property {function} error - The error callback
+ * @property id - The transaction identifier
+ * @property owner - A reference to the object that created the transaction
+ * @property request - The janus request for the pending transaction
+ * @property done - The success callback
+ * @property error - The error callback
  */
+export type PendingTransaction = {
+  id: string,
+  owner: TransactionOwner,
+  request: string,
+  done: (value: Response) => void,
+  error: (reason?: any) => void
+  timeout?: NodeJS.Timeout
+}
 
-import Logger from './utils/logger.js';
-const LOG_NS = '[tmanager.js]';
-import { getNumericID, getCliArgument } from './utils/utils.js';
+import type { JanodeResponse } from './handle.ts'
+import Logger from './utils/logger.ts';
+const LOG_NS = '[tmanager.ts]';
+import { getNumericID, getCliArgument } from './utils/utils.ts';
 
-const debug = getCliArgument('debug-tx', 'boolean', false);
+const debug = getCliArgument<boolean>('debug-tx', 'boolean', false);
 
 /**
  * Class representing a Janode Transaction Manager (TM).
@@ -32,23 +44,26 @@ const debug = getCliArgument('debug-tx', 'boolean', false);
  * @private
  */
 class TransactionManager {
+  transactions: Map<string, PendingTransaction>;
+  id: string;
+  private _dbgtask: NodeJS.Timeout | undefined;
   /**
    * Create a Transacton Manager (TM)
    *
-   * @param {string} [id] - The identifier given to the manager (got from a counter if missing)
+   * @param [id] - The identifier given to the manager (got from a counter if missing)
    */
-  constructor(id = getNumericID()) {
+  constructor(id: string = getNumericID()) {
     this.transactions = new Map();
     this.id = id;
     Logger.info(`${LOG_NS} [${this.id}] creating new transaction manager (debug=${debug})`);
-    this._dbgtask = null;
+    this._dbgtask = undefined;
     /* If tx debugging is enabled, periodically print the size of the tx table */
   }
 
   /**
    * Clear the internal transaction table and the debugging printing task.
    */
-  clear() {
+  clear(): void {
     Logger.info(`${LOG_NS} [${this.id}] clearing transaction manager`);
     clearInterval(this._dbgtask);
     this.transactions.clear();
@@ -57,10 +72,10 @@ class TransactionManager {
   /**
    * Check if the TM has a specific transaction.
    *
-   * @param {string} id - The transaction id
-   * @returns {boolean} True if the manager contains the transaction
+   * @param id - The transaction id
+   * @returns True if the manager contains the transaction
    */
-  has(id) {
+  has(id: string): boolean {
     if (!id) return false;
     return this.transactions.has(id);
   }
@@ -68,36 +83,36 @@ class TransactionManager {
   /**
    * Get a specific transaction from the TM.
    *
-   * @param {string} id - The transaction id
-   * @returns {PendingTransaction|void} The wanted transaction, or nothing if missing
+   * @param id - The transaction id
+   * @returns The wanted transaction, or nothing if missing
    */
-  get(id) {
-    if (!id) return null;
-    if (!this.has(id)) return null;
+  get(id: string): PendingTransaction | undefined {
+    if (!id) return undefined;
+    if (!this.has(id)) return undefined;
     return this.transactions.get(id);
   }
 
   /**
    * Get the current size of the transaction table.
    *
-   * @returns {number} The size of the table
+   * The size of the table
    */
-  size() {
+  size(): number {
     return this.transactions.size;
   }
 
   /**
    * Add a pending transaction to the TM.
    *
-   * @param {string} id - The transaction id
-   * @param {PendingTransaction} transaction
+   * @param id - The transaction id
+   * @param transaction
    */
-  set(id, transaction) {
+  set(id: string, transaction: PendingTransaction): void {
     if (!id) return;
     if (!transaction) return;
     this.transactions.set(id, transaction);
     if (debug && !this._dbgtask) {
-      this._dbgtask = setInterval(_ => {
+      this._dbgtask = setInterval(() => {
         Logger.info(`${LOG_NS} [${this.id}] TM DEBUG size=${this.size()}`);
       }, 5000);
     }
@@ -106,9 +121,9 @@ class TransactionManager {
   /**
    * Delete a specific transaction from the TM.
    *
-   * @param {string} id - The transaction id to delete
+   * @param id - The transaction id to delete
    */
-  delete(id) {
+  delete(id: string): void {
     if (!id) return;
     if (!this.has(id)) return;
     this.transactions.delete(id);
@@ -117,29 +132,29 @@ class TransactionManager {
   /**
    * Get the owner of a specific transaction id.
    *
-   * @param {string} id - The transaction id
-   * @returns {object|void} A reference to the owner object, or nothing if transaction is missing
+   * @param id - The transaction id
+   * @returns A reference to the owner object, or nothing if transaction is missing
    */
-  getTransactionOwner(id) {
-    if (!id) return;
-    if (!this.has(id)) return;
-    return this.get(id).owner;
+  getTransactionOwner(id: string): TransactionOwner | null {
+    if (!id) return null;
+    if (!this.has(id)) return null;
+    return this.get(id)!.owner;
   }
 
   /**
    * Create a new transaction if id does not exist in the table and add it to the TM.
    *
-   * @param {string} id - The transaction identifier
-   * @param {Object} owner - A reference to the object that created the transaction
-   * @param {string} request - The janus request for the pending transaction
-   * @param {function} done - The success callback
-   * @param {function} error - The error callback
-   * @param {number} [timeout_ms=0] - The timeout of the transaction
-   * @returns {PendingTransaction|void} The newly created transaction, or nothing if the id already exists
+   * @param id - The transaction identifier
+   * @param owner - A reference to the object that created the transaction
+   * @param request - The janus request for the pending transaction
+   * @param done - The success callback
+   * @param error - The error callback
+   * @param [timeout_ms=0] - The timeout of the transaction
+   * @returns The newly created transaction, or nothing if the id already exists
    */
-  createTransaction(id, owner, request, done, error, timeout_ms = 0) {
+  createTransaction(id: string, owner: TransactionOwner, request: string, done: (value: Response) => void, error: (reason?: any) => void, timeout_ms: number = 0): PendingTransaction | void {
     if (this.has(id)) return;
-    const tx = {
+    const tx: PendingTransaction = {
       id,
       owner,
       request,
@@ -147,7 +162,7 @@ class TransactionManager {
       error,
     };
     if (timeout_ms > 0) {
-      const timeout = setTimeout(_ => {
+      const timeout = setTimeout(() => {
         this.delete(id);
         error(new Error('Transaction timed out!'));
         Logger.error(`${LOG_NS} [${owner.id}] closed with timeout transaction ${id}, request "${request}"`);
@@ -164,12 +179,12 @@ class TransactionManager {
    * Close a transaction with an error if the id is found and the owner matches.
    * The closed transaction will be removed from the internal table and the error cb will be invoked with the error string.
    *
-   * @param {string} id - The transaction identifier
-   * @param {Object} owner - A reference to the transaction owner
-   * @param {Error} error - The error object
-   * @returns {PendingTransaction|void} The closed transaction, or nothing if the id does not exist or the owner does not match
+   * @param id - The transaction identifier
+   * @param owner - A reference to the transaction owner
+   * @param error - The error object
+   * @returns The closed transaction, or nothing if the id does not exist or the owner does not match
    */
-  closeTransactionWithError(id, owner, error) {
+  closeTransactionWithError(id: string, owner: TransactionOwner, error: Error): PendingTransaction | void {
     const tx = this.get(id);
     if (!tx) return;
     if (tx.owner !== owner) return;
@@ -185,10 +200,10 @@ class TransactionManager {
    * If an owner is specified only the owner's transaction will be closed.
    * The closed transactions will be removed from the internal table.
    *
-   * @param {Object} [owner] - A reference to the transaction owner
-   * @param {Error} error - The error object
+   * @param [owner] - A reference to the transaction owner
+   * @param error - The error object
    */
-  closeAllTransactionsWithError(owner, error) {
+  closeAllTransactionsWithError(owner: TransactionOwner | undefined, error: Error) {
     for (const [_, pendingTx] of this.transactions) {
       if (!owner || pendingTx.owner === owner)
         this.closeTransactionWithError(pendingTx.id, pendingTx.owner, error);
@@ -199,12 +214,12 @@ class TransactionManager {
    * Close a transaction with success if the id is found and the owner matches.
    * The closed transaction will be removed from the internal table and the success cb will be invoked with the specified data.
    *
-   * @param {string} id - The transaction identifier
-   * @param {Object} owner - A reference to the transaction owner
-   * @param {Object} data - The success callback data
-   * @returns {PendingTransaction|void} The closed transaction, or nothing if the id does not exist or the owner does not match
+   * @param id - The transaction identifier
+   * @param owner - A reference to the transaction owner
+   * @param data - The success callback data
+   * @returns The closed transaction, or nothing if the id does not exist or the owner does not match
    */
-  closeTransactionWithSuccess(id, owner, data) {
+  closeTransactionWithSuccess(id: string, owner: TransactionOwner, data: JanodeResponse): PendingTransaction | void {
     const tx = this.get(id);
     if (!tx) return;
     if (tx.owner !== owner) return;
@@ -217,20 +232,3 @@ class TransactionManager {
 }
 
 export default TransactionManager;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

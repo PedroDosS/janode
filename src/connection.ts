@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * This module contains the Connection class definition.
  * @module connection
@@ -8,15 +6,29 @@
 
 import { EventEmitter } from 'events';
 
-import Logger from './utils/logger.js';
-const LOG_NS = '[connection.js]';
-import { getNumericID, checkUrl, newIterator } from './utils/utils.js';
-import { JANODE, JANUS, isResponseData, isErrorData } from './protocol.js';
-import WsTransport from './transport-ws.js';
-import UnixTransport from './transport-unix.js';
-import JanodeSession from './session.js';
-import TransactionManager from './tmanager.js';
+import Logger from './utils/logger.ts';
+const LOG_NS = '[connection.ts]';
+import { getNumericID, checkUrl, newIterator } from './utils/utils.ts';
+import { JANODE, JANUS, isResponseData, isErrorData } from './protocol.ts';
+import WsTransport from './transport-ws.ts';
+import UnixTransport from './transport-unix.ts';
+import JanodeSession from './session.ts';
+import TransactionManager from './tmanager.ts';
 
+import Configuration from './configuration.ts';
+import Session from './session.ts';
+
+import type { PendingTransaction } from './tmanager.ts';
+import type { ServerObjectConf } from './janode.ts';
+import type { JanodeRequest, JanodeResponse, JanusMessage } from './handle.ts';
+import type { CircularIterator } from './utils/utils.ts';
+
+export interface GenericTransport {
+  open: () => Promise<Connection>,
+  close: () => Promise<unknown>,
+  send: (request: unknown) => Promise<void>, // TODO: the JSDocs for transport-ws and transport-unix mention that the promise is meant to return an object, but neither of them (seemingly) actually do?
+  getRemoteHostname: () => string | null
+}
 
 /**
  * Class representing a Janode connection.<br>
@@ -32,19 +44,25 @@ import TransactionManager from './tmanager.js';
  * @hideconstructor
  */
 class Connection extends EventEmitter {
+  _config: Configuration; // Meant to be private, but used in transport-ws.ts
+  _tm: TransactionManager; // Meant to be private, but used in Session.ts
+  private _sessions: Map<unknown, Session>; // TODO: Fix Type
+  _address_iterator: CircularIterator<ServerObjectConf> // Meant to be private but used in transport-unix.ts
+  id: number;
+  name: string;
+  private _transport: GenericTransport;
   /**
    * Create a Janode Connection.
    *
-   * @param {module:configuration~Configuration} server_config - The Janode configuration as created by the Configuration constructor.
+   * @param {Configuration} server_config - The Janode configuration as created by the Configuration constructor.
    */
-  constructor(server_config) {
+  constructor(server_config: Configuration) {
     super();
 
     /**
      * The configuration in use for this connection.
      *
      * @private
-     * @type {module:configuration~Configuration}
      */
     this._config = server_config;
 
@@ -52,7 +70,6 @@ class Connection extends EventEmitter {
      * The transaction manager used by this connection.
      *
      * @private
-     * @type {module:tmanager~TransactionManager}
      */
     this._tm = new TransactionManager();
 
@@ -60,7 +77,6 @@ class Connection extends EventEmitter {
      * Keep track of the sessions.
      *
      * @private
-     * @type {Map}
      */
     this._sessions = new Map();
 
@@ -68,21 +84,18 @@ class Connection extends EventEmitter {
      * The iterator to select available Janus addresses.
      *
      * @private
-     * @type {module:utils~CircularIterator}
      */
     this._address_iterator = newIterator(this._config.getAddress());
 
     /**
      * A numerical identifier assigned for logging purposes.
      *
-     * @type {number}
      */
     this.id = parseInt(getNumericID());
 
     /**
      * A more descriptive, not unique string (used for logging).
      *
-     * @type {string}
      */
     this.name = `[${this.id}]`;
 
@@ -92,14 +105,14 @@ class Connection extends EventEmitter {
      * @private
      */
     this._transport = {
-      open: async _ => { throw new Error('transport does not implement the "open" function'); },
-      close: async _ => { throw new Error('transport does not implement the "close" function'); },
-      send: async _ => { throw new Error('transport does not implement the "send" function'); },
-      getRemoteHostname: _ => { throw new Error('transport does not implement the "getRemoteHostname" function'); },
+      open: async () => { throw new Error('transport does not implement the "open" function'); },
+      close: async () => { throw new Error('transport does not implement the "close" function'); },
+      send: async () => { throw new Error('transport does not implement the "send" function'); },
+      getRemoteHostname: () => { throw new Error('transport does not implement the "getRemoteHostname" function'); },
     };
 
     try {
-      let transport;
+      let transport: GenericTransport | undefined;
       /* Check the protocol to define the kind of transport */
       if (checkUrl(server_config.getAddress()[0].url, ['ws', 'wss', 'ws+unix', 'wss+unix'])) {
         transport = new WsTransport(this);
@@ -109,7 +122,7 @@ class Connection extends EventEmitter {
       }
       if (transport) this._transport = transport;
     } catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} error while initializing transport (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} error while initializing transport (${(error as Error).message})`);
     }
 
     /* Set a dummy error listener to avoid unmanaged errors */
@@ -121,11 +134,11 @@ class Connection extends EventEmitter {
    * and removing all registered listeners.
    *
    * @private
-   * @param {boolean} graceful - True if this is an expected disconnection
+   * @param graceful - True if this is an expected disconnection
    */
-  _signalClose(graceful) {
+  _signalClose(graceful: boolean): void {
     /* Close all pending transactions inside this connection with an error */
-    this._tm.closeAllTransactionsWithError(null, new Error('connection closed'));
+    this._tm.closeAllTransactionsWithError(undefined, new Error('connection closed'));
     /* Clear tx table */
     this._tm.clear();
     /* Clear session table */
@@ -137,7 +150,7 @@ class Connection extends EventEmitter {
       /**
        * The connection has been gracefully closed.
        *
-       * @event module:connection~Connection#event:CONNECTION_CLOSED
+       * @event Connection#event:CONNECTION_CLOSED
        * @type {Object}
        * @property {number} id - The connection identifier
        */
@@ -149,7 +162,7 @@ class Connection extends EventEmitter {
       /**
        * The connection has been unexpectedly closed.
        *
-       * @event module:connection~Connection#event:CONNECTION_ERROR
+       * @event Connection#event:CONNECTION_ERROR
        * @type {Error}
        */
       this.emit(JANODE.EVENT.CONNECTION_ERROR, error);
@@ -163,9 +176,9 @@ class Connection extends EventEmitter {
    * Open a connection using the transport defined open method.
    * Users do not need to call this method, since the connection is opened by Janode.connect().
    *
-   * @returns {Promise<module:connection~Connection>} A promise resolving with the Janode connection
+   * @returns A promise resolving with the Janode connection
    */
-  async open() {
+  async open(): Promise<Connection> {
     await this._transport.open();
     return this;
   }
@@ -176,9 +189,8 @@ class Connection extends EventEmitter {
    * the transaction will be closed.
    *
    * @private
-   * @param {Object} janus_message
    */
-  _handleMessage(janus_message) {
+  _handleMessage(janus_message: JanusMessage): PendingTransaction | void {
     const { session_id, transaction, janus } = janus_message;
 
     /* Check if a session is involved */
@@ -195,7 +207,7 @@ class Connection extends EventEmitter {
         /* Let the session manage the message */
         session._handleMessage(janus_message);
       } catch (error) {
-        Logger.error(`${LOG_NS} ${this.name} error while handling message (${error.message})`);
+        Logger.error(`${LOG_NS} ${this.name} error while handling message (${(error as Error).message})`);
       }
       return;
     }
@@ -233,11 +245,8 @@ class Connection extends EventEmitter {
 
   /**
    * Decorate request with apisecret, token and transaction (if missing).
-   *
-   * @private
-   * @param {Object} request
    */
-  _decorateRequest(request) {
+  _decorateRequest(request: JanodeRequest) {
     request.transaction = request.transaction || getNumericID();
     if (this._address_iterator.currElem().apisecret) {
       if (!this._config.isAdmin())
@@ -251,10 +260,8 @@ class Connection extends EventEmitter {
 
   /**
    * Gracefully close the connection using the transport defined close method.
-   *
-   * @returns {Promise<void>}
    */
-  async close() {
+  async close(): Promise<void> {
     await this._transport.close();
     return;
   }
@@ -262,14 +269,14 @@ class Connection extends EventEmitter {
   /**
    * Send a request from this connection using the transport defined send method.
    *
-   * @param {Object} request - The request to be sent
-   * @returns {Promise<Object>} A promise resolving with a response from Janus
+   * @param request - The request to be sent
+   * @returns A promise resolving with a response from Janus
    */
-  async sendRequest(request) {
+  async sendRequest(request: JanodeRequest): Promise<JanodeResponse> {
     /* Add connection properties */
     this._decorateRequest(request);
 
-    return new Promise((resolve, reject) => {
+    return new Promise<JanodeResponse>((resolve, reject) => {
       /* Create a new transaction if the transaction does not exist */
       /* Use promise resolve and reject fn as callbacks for the transaction */
       this._tm.createTransaction(request.transaction, this, request.janus, resolve, reject);
@@ -286,24 +293,24 @@ class Connection extends EventEmitter {
   /**
    * Get the remote Janus hostname using the transport defined method.
    *
-   * @returns {string} The hostname of the Janus server
+   * @returns The hostname of the Janus server
    */
-  getRemoteHostname() {
+  getRemoteHostname(): string | null {
     return this._transport.getRemoteHostname();
   }
 
   /**
    * Create a new session in this connection.
    *
-   * @param {number} [ka_interval] - The time interval (seconds) for session keep-alive requests
-   * @returns {Promise<module:session~Session>} The newly created session
+   * @param [ka_interval] - The time interval (seconds) for session keep-alive requests
+   * @returns The newly created session
    *
    * @example
    *
    * const session = await connection.create();
    * Logger.info(`***** SESSION CREATED *****`);
    */
-  async create(ka_interval) {
+  async create(ka_interval?: number): Promise<Session> {
     Logger.info(`${LOG_NS} ${this.name} creating new session`);
 
     const request = {
@@ -330,7 +337,7 @@ class Connection extends EventEmitter {
       return session_instance;
     }
     catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} session creation error (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} session creation error (${(error as Error).message})`);
       throw error;
     }
   }
@@ -338,14 +345,14 @@ class Connection extends EventEmitter {
   /**
    * Janus GET INFO API.
    *
-   * @returns {Promise<Object>} The Get Info response
+   * @returns The Get Info response
    *
    * @example
    *
    * const info = await connection.getInfo();
    * Logger.info(`${info.name} ${info.version_string}`);
    */
-  async getInfo() {
+  async getInfo(): Promise<JanodeResponse> {
     Logger.info(`${LOG_NS} ${this.name} requesting server info`);
 
     const request = {
@@ -364,14 +371,12 @@ class Connection extends EventEmitter {
   /**
    * (Admin API) List the sessions in a janus instance.
    *
-   * @returns {Promise<Object>}
-   *
    * @example
    *
    * const data = await connection.listSessions();
    * Logger.info(`${JSON.stringify(data)}`);
    */
-  async listSessions() {
+  async listSessions(): Promise<JanodeResponse> {
     Logger.verbose(`${LOG_NS} ${this.name} requesting session list`);
 
     const request = {
@@ -384,15 +389,14 @@ class Connection extends EventEmitter {
   /**
    * (Admin API) List the handles in a session.
    *
-   * @param {number} session_id - The identifier of the session
-   * @returns {Promise<Object>}
+   * @param session_id - The identifier of the session
    *
    * @example
    *
    * const data = await connection.listSessions();
    * Logger.info(`${JSON.stringify(data)}`);
    */
-  async listHandles(session_id) {
+  async listHandles(session_id: number): Promise<JanodeResponse> {
     Logger.info(`${LOG_NS} ${this.name} requesting handle list`);
     if (!session_id) {
       const error = new Error('session_id parameter not specified');
@@ -410,16 +414,16 @@ class Connection extends EventEmitter {
   /**
    * (Admin API) Get an handle info.
    *
-   * @param {number} session_id - The session identifier
-   * @param {number} handle_id - The handle identifier
-   * @returns {Promise<Object>} The Get Handle Info response
+   * @param session_id - The session identifier
+   * @param handle_id - The handle identifier
+   * @returns The Get Handle Info response
    *
    * @example
    *
    * const data = await connection.handleInfo(session.id, handle.id);
    * Logger.info(`${JSON.stringify(data)}`);
    */
-  async handleInfo(session_id, handle_id) {
+  async handleInfo(session_id: number, handle_id: number): Promise<JanodeResponse> {
     Logger.info(`${LOG_NS} ${this.name} requesting handle info`);
     if (!session_id) {
       const error = new Error('session_id parameter not specified');
@@ -443,14 +447,14 @@ class Connection extends EventEmitter {
   /**
    * (Admin API) Start a packet capture on an handle.
    *
-   * @param {number} session_id - The session identifier
-   * @param {number} handle_id - The handle identifier
-   * @param {string} folder - The folder in which save the pcap
-   * @param {string} filename - The pcap file name
-   * @param {number} [truncate] - Number of bytes to truncate the pcap to
-   * @returns {Promise<Object>} The start pcap response
+   * @param session_id - The session identifier
+   * @param handle_id - The handle identifier
+   * @param folder - The folder in which save the pcap
+   * @param filename - The pcap file name
+   * @param [truncate] - Number of bytes to truncate the pcap to
+   * @returns The start pcap response
    */
-  async startPcap(session_id, handle_id, folder, filename, truncate) {
+  async startPcap(session_id: number, handle_id: number, folder: string, filename: string, truncate?: number): Promise<JanodeResponse> {
     Logger.info(`${LOG_NS} ${this.name} requesting pcap start for handle ${handle_id}`);
     if (!session_id) {
       const error = new Error('session_id parameter not specified');
@@ -467,7 +471,7 @@ class Connection extends EventEmitter {
       Logger.error(`${LOG_NS} ${this.name} ${error.message}`);
       throw error;
     }
-    const request = {
+    const request: any = {
       janus: JANUS.ADMIN.START_PCAP,
       session_id,
       handle_id,
@@ -484,11 +488,11 @@ class Connection extends EventEmitter {
   /**
    * Stop an ogoing packet capture.
    *
-   * @param {number} session_id - The session identifier
-   * @param {number} handle_id - The handle identifier
-   * @returns {Promise<Object>} The stop pcap response
+   * @param session_id - The session identifier
+   * @param handle_id - The handle identifier
+   * @returns The stop pcap response
    */
-  async stopPcap(session_id, handle_id) {
+  async stopPcap(session_id: number, handle_id: number): Promise<JanodeResponse> {
     Logger.info(`${LOG_NS} ${this.name} requesting pcap stop for handle ${handle_id}`);
     if (!session_id) {
       const error = new Error('session_id parameter not specified');

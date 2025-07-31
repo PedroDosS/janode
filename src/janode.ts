@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * This module is the entry point of the Janode library.<br>
  *
@@ -7,42 +5,70 @@
  * @module janode
  */
 
-import Logger from './utils/logger.js';
-const LOG_NS = '[janode.js]';
-import Configuration from './configuration.js';
-import Connection from './connection.js';
-import { JANODE as JANODE_PROTO } from './protocol.js';
+import Logger from './utils/logger.ts';
+const LOG_NS = '[janode.ts]';
+import Configuration from './configuration.ts';
+import Connection from './connection.ts';
+import { JANODE as JANODE_PROTO } from './protocol.ts';
 const { EVENT } = JANODE_PROTO;
+
+import Session from './session.ts';
+import Handle from './handle.ts';
+import type { JanodeCoreEvents } from './protocol.ts';
+import type { ClientOptions } from 'ws';
 
 /**
  * An object describing a janus server (e.g. url, secret).
  *
- * @typedef {Object} ServerObjectConf
- * @property {string} url - The URL to reach this server API
- * @property {string} apisecret - The API secret for this server
- * @property {string} [token] - The optional Janus API token
+ * @property url - The URL to reach this server API
+ * @property apisecret - The API secret for this server
+ * @property [token] - The optional Janus API token
  */
+export type ServerObjectConf = {
+  url: string,
+  apisecret: string,
+  token?: string
+}
 
 /**
  * The configuration passed by the user.
  *
- * @typedef {Object} RawConfiguration
- * @property {string} [server_key] - The key used to refer to this server in Janode.connect
- * @property {module:janode~ServerObjectConf[]|module:janode~ServerObjectConf} address - The server to connect to
- * @property {number} [retry_time_secs=10] - The seconds between any connection attempts
- * @property {number} [max_retries=5] - The maximum number of retries before issuing a connection error
- * @property {boolean} [is_admin=false] - True if the connection is dedicated to the Janus Admin API
- * @property {Object} [ws_options] - Specific WebSocket transport options
+ * @property [server_key] - The key used to refer to this server in Janode.connect
+ * @property address - The server to connect to
+ * @property [retry_time_secs=10] - The seconds between any connection attempts
+ * @property [max_retries=5] - The maximum number of retries before issuing a connection error
+ * @property [is_admin=false] - True if the connection is dedicated to the Janus Admin API
+ * @property [ws_options] - Specific WebSocket transport options
  */
+export type RawConfiguration = {
+  server_key?: string,
+  address: ServerObjectConf[] | ServerObjectConf,
+  retry_time_secs?: number,
+  max_retries?: number,
+  is_admin?: boolean,
+  ws_options?: ClientOptions
+}
+
+/**
+ * @private
+ */
+interface Constructor<T> {
+  new(session: Session, id: number): T
+}
 
 /**
  * The plugin descriptor used when attaching a plugin from a session.
  *
- * @typedef {Object} PluginDescriptor
- * @property {string} id - The plugin id used when sending the attach request to Janus
- * @property {module:handle~Handle} [Handle] - The class implementing the handle
- * @property {Object} [EVENT] - The object containing the events emitted by the plugin
+ * @property id - The plugin id used when sending the attach request to Janus
+ * @property [Handle] - The class implementing the handle
+ * @property [EVENT] - The object containing the events emitted by the plugin
  */
+//TODO: event = JanodeCoreEvents?
+export type PluginDescriptor<T extends Handle = Handle> = {
+  id: string,
+  Handle?: Constructor<T>,
+  event?: JanodeCoreEvents
+}
 
 /**
  * Connect using a defined configuration.<br>
@@ -52,9 +78,9 @@ const { EVENT } = JANODE_PROTO;
  * If it is a string it will pick the server configuration that matches the "server_key" property.
  * In case "key" is missing, Janode will fallback to index 0.
  *
- * @param {module:janode~RawConfiguration|module:janode~RawConfiguration[]} config - The configuration to be used
- * @param {number|string} [key=0] - The index of the config in the array to use, or the server of the arrray matching this server key
- * @returns {Promise<module:connection~Connection>} The promise resolving with the Janode connection
+ * @param config - The configuration to be used
+ * @param [key=0] - The index of the config in the array to use, or the server of the arrray matching this server key
+ * @returns The promise resolving with the Janode connection
  *
  * @example
  *
@@ -104,7 +130,8 @@ const { EVENT } = JANODE_PROTO;
  *   }],
  * }], 'server_B');
  */
-const connect = (config = {}, key = null) => {
+// TODO: I removed config = {}
+const connect = (config: RawConfiguration | RawConfiguration[], key?: number | string): Promise<Connection> => {
   Logger.info(`${LOG_NS} creating new connection`);
   const janus_server_list = Array.isArray(config) ? config : [config];
   let index = 0;
@@ -133,14 +160,14 @@ export default {
   /**
    * The Logger used in Janode.
    *
-   * @type {module:logger~Logger}
+   * @type
    */
-  Logger,
+  Logger: Logger,
 
   /**
    * Events emitted by Janode
    *
-   * @type {module:protocol~JanodeCoreEvents}
+   * @type
    */
-  EVENT,
+  EVENT: EVENT,
 };

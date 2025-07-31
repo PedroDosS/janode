@@ -1,10 +1,11 @@
-'use strict';
-
 /**
  * This module contains the Configuration class definition.
  * @module configuration
  * @private
  */
+
+import type { ClientOptions } from "ws";
+import type { RawConfiguration, ServerObjectConf } from "./janode.ts";
 
 const DEF_RETRY_TIME = 10;
 const DEF_MAX_RETRIES = 5;
@@ -14,13 +15,19 @@ const DEF_MAX_RETRIES = 5;
  * The purpose of the class is basically filtering the input config and distinguish Janus API and Admin API connections.
  */
 class Configuration {
+  private address: ServerObjectConf[]
+  private retry_time_secs: number;
+  private max_retries: number;
+  private is_admin: boolean;
+  private ws_options: ClientOptions | null;
+
   /**
    * Create a configuration.
    *
    * @private
-   * @param {module:janode~RawConfiguration} config
+   * @param {RawConfiguration} config
    */
-  constructor({ address, retry_time_secs, max_retries, is_admin, ws_options }) {
+  constructor({ address, retry_time_secs, max_retries, is_admin, ws_options }: RawConfiguration) {
     if (!address)
       throw new Error('invalid configuration, missing parameter "address"');
     if (Array.isArray(address) && address.length === 0)
@@ -42,45 +49,43 @@ class Configuration {
   /**
    * Get the server list of this configuration.
    *
-   * @returns {module:janode~ServerObjectConf[]} The address array
+   * @returns The address array
    */
-  getAddress() {
+  getAddress(): ServerObjectConf[] {
     return this.address;
   }
 
   /**
    * Get the number of seconds between any attempt.
    *
-   * @returns {number} The value of the property
+   * @returns The value of the property
    */
-  getRetryTimeSeconds() {
+  getRetryTimeSeconds(): number {
     return this.retry_time_secs;
   }
 
   /**
    * Get the max number of retries.
    *
-   * @returns {number} The value of the property
+   * @returns The value of the property
    */
-  getMaxRetries() {
+  getMaxRetries(): number {
     return this.max_retries;
   }
 
   /**
    * Check if the configuration is for an admin connection.
    *
-   * @returns {boolean} True if the configuration will be used for an admin connection
+   * @returns True if the configuration will be used for an admin connection
    */
-  isAdmin() {
+  isAdmin(): boolean {
     return this.is_admin;
   }
 
   /**
    * Return the specific WebSocket transport options.
-   *
-   * @returns {Object}
    */
-  wsOptions() {
+  wsOptions(): ClientOptions | null {
     return this.ws_options;
   }
 }

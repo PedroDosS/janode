@@ -22,21 +22,23 @@
     "url": "https://github.com/meetecho/janode/issues"
   },
   "license": "ISC",
-  "main": "./src/janode.js",
+  "main": "./src/janode.ts",
   "exports": {
-    ".": "./src/janode.js",
-    "./handle": "./src/handle.js",
+    ".": "./src/janode.ts",
+    "./handle": "./src/handle.ts",
+    "./session": "./src/session.ts",
     "./plugins/audiobridge": "./src/plugins/audiobridge-plugin.js",
     "./plugins/echotest": "./src/plugins/echotest-plugin.js",
     "./plugins/recordplay": "./src/plugins/recordplay-plugin.js",
     "./plugins/sip": "./src/plugins/sip-plugin.js",
     "./plugins/streaming": "./src/plugins/streaming-plugin.js",
     "./plugins/textroom": "./src/plugins/textroom-plugin.js",
-    "./plugins/videoroom": "./src/plugins/videoroom-plugin.js"
+    "./plugins/videoroom": "./src/plugins/videoroom-plugin.ts"
   },
   "files": [
-    "src/*.js",
-    "src/utils/*.js",
+    "src/*.ts",
+    "src/utils/*.ts",
+    "src/plugins/*.ts",
     "src/plugins/*.js"
   ],
   "dependencies": {
@@ -46,6 +48,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.4.0",
+    "@types/node": "^24.1.0",
+    "@types/ws": "^8.18.1",
     "clean-jsdoc-theme": "^4.3.0",
     "eslint": "^9.4.0",
     "globals": "^15.4.0",
@@ -55,7 +59,7 @@
     "node": " >=18.18.0"
   },
   "scripts": {
-    "build": "npm install --omit=dev",
+    "build": "npm install --omit=dev && tsc --build",
     "lint": "npx eslint --debug",
     "build-docs": "rm -rf ./docs && npx jsdoc -c ./jsdoc.json --destination ./docs ./src"
   }

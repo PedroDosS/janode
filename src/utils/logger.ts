@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * The logging module used in janode.<br>
  *
@@ -10,13 +8,11 @@
  * @private
  */
 
-import { getCliArgument } from './utils.js';
+import { getCliArgument } from './utils.ts';
 
-const LEVELS = ['none', 'error', 'warning', 'info', 'verbose', 'debug'];
-const LEVELS_IDX = LEVELS.reduce((obj, lvl, idx) => {
-  obj[lvl] = idx;
-  return obj;
-}, {});
+type LoggerLevel = 'none' | 'error' | 'warning' | 'info' | 'verbose' | 'debug'
+const LEVELS: LoggerLevel[] = ['none', 'error', 'warning', 'info', 'verbose', 'debug'];
+const LEVELS_IDX = Object.fromEntries(LEVELS.map((lvl, index) => [lvl, index]))
 
 const DEFAULT_LEVEL = 'info';
 
@@ -28,10 +24,11 @@ const DEFAULT_LEVEL = 'info';
  * @hideconstructor
  */
 class Logger {
-  constructor(lvl = DEFAULT_LEVEL) {
+  _log_verbosity: LoggerLevel;
+  constructor(lvl: string = DEFAULT_LEVEL) {
     /**
      * The current verbosity level of the logger.
-     * @type {string}
+     * @type {LoggerLevel}
      * @private
      */
     this._log_verbosity = this.setLevel(lvl);
@@ -40,7 +37,7 @@ class Logger {
   /**
    * @private
    */
-  _printout(msg_verbosity, console_fn, ...args) {
+  _printout(msg_verbosity: string, console_fn: (...data: any[]) => void, ...args: any[]): void {
     if (LEVELS_IDX[msg_verbosity] > LEVELS_IDX[this._log_verbosity]) return;
     const ts = (new Date()).toISOString();
     const prefix = `${ts} - ${msg_verbosity.toUpperCase().padEnd(8, ' ')}:`;
@@ -57,9 +54,9 @@ class Logger {
    * It is a wrapper for `console.debug()`.
    *
    * @function
-   * @param {...any} args
+   * @param args
    */
-  debug(...args) {
+  debug(...args: any[]): void {
     this._printout('debug', console.debug, ...args);
   }
 
@@ -68,9 +65,9 @@ class Logger {
    * It is a wrapper for `console.debug()`.
    *
    * @function
-   * @param {...any} args
+   * @param args
    */
-  verbose(...args) {
+  verbose(...args: any[]): void {
     this._printout('verbose', console.debug, ...args);
   }
 
@@ -78,9 +75,9 @@ class Logger {
    * Alias for verbose.
    *
    * @function
-   * @param {...any} args
+   * @param args
    */
-  verb(...args) {
+  verb(...args: any[]): void {
     this.verbose(...args);
   }
 
@@ -89,9 +86,9 @@ class Logger {
    * It is a wrapper for `console.info()`.
    *
    * @function
-   * @param {...any} args
+   * @param args
    */
-  info(...args) {
+  info(...args: any[]): void {
     this._printout('info', console.info, ...args);
   }
 
@@ -100,9 +97,9 @@ class Logger {
    * It is a wrapper for `console.warn()`.
    *
    * @function
-   * @param {...any} args
+   * @param args
    */
-  warning(...args) {
+  warning(...args: any[]) {
     this._printout('warning', console.warn, ...args);
   }
 
@@ -110,9 +107,9 @@ class Logger {
    * Alias for warning.
    *
    * @function
-   * @param {...any} args
+   * @param args
    */
-  warn(...args) {
+  warn(...args: any[]) {
     this.warning(...args);
   }
 
@@ -121,9 +118,9 @@ class Logger {
    * It is a wrapper for `console.error()`.
    *
    * @function
-   * @param {...any} args
+   * @param args
    */
-  error(...args) {
+  error(...args: any[]) {
     this._printout('error', console.error, ...args);
   }
 
@@ -131,15 +128,15 @@ class Logger {
    * Set level of logger.
    *
    * @function
-   * @param {"debug"|"verb"|"info"|"warn"|"error"|"none"} lvl
-   * @returns {string} The current level
+   * @param lvl
+   * @returns The current level
    */
-  setLevel(lvl = '') {
-    lvl = lvl.toLowerCase();
+  setLevel(lvl: string = ''): LoggerLevel {
+    lvl = lvl.toLowerCase() as LoggerLevel | 'verb' | 'warn';
     if (lvl === 'verb') lvl = 'verbose';
     if (lvl === 'warn') lvl = 'warning';
     if (typeof LEVELS_IDX[lvl] === 'number') {
-      this._log_verbosity = lvl;
+      this._log_verbosity = (lvl as LoggerLevel);
     }
     else {
       this._log_verbosity = DEFAULT_LEVEL;
@@ -151,15 +148,15 @@ class Logger {
    * Alias for setLevel.
    *
    * @function
-   * @param {"debug"|"verb"|"info"|"warn"|"error"|"none"} lvl
-   * @returns {string} The current level
+   * @param lvl
+   * @returns The current level
    */
-  setLogLevel(lvl = '') {
+  setLogLevel(lvl: string = ''): LoggerLevel {
     return this.setLevel(lvl);
   }
 }
 
-const cli_log_verbosity = getCliArgument('janode-log', 'string', DEFAULT_LEVEL);
+const cli_log_verbosity = getCliArgument<string>('janode-log', 'string', DEFAULT_LEVEL);
 const loggerInstance = new Logger(cli_log_verbosity);
 
 export default loggerInstance;

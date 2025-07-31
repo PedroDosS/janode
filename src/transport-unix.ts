@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * This module contains the Unix Sockets transport implementation.
  * @module transport-unix
@@ -10,16 +8,26 @@ import { Buffer } from 'buffer';
 import { unlinkSync } from 'fs';
 
 /* External dependency with Unix dgram sockets implementation */
+// @ts-expect-error
 import { createSocket } from 'unix-dgram';
 
-import Logger from './utils/logger.js';
-const LOG_NS = '[transport-unix.js]';
-import { delayOp } from './utils/utils.js';
+import Logger from './utils/logger.ts';
+const LOG_NS = '[transport-unix.ts]';
+import { delayOp } from './utils/utils.ts';
+
+import Connection from './connection.ts';
+import type { GenericTransport } from './connection.ts'
+import type { JanodeRequest } from './handle.ts';
+import type { TransactionOwner } from './tmanager.ts';
 
 /**
- * @typedef {Object} UnixDgramSocket
  * @link https://www.npmjs.com/package/unix-dgram#api
  */
+type UnixDgramSocket = {
+  close: () => void
+  removeAllListeners: () => void
+  send: (buf: Buffer, callback?: (error: any) => void) => void // Might be incorrect
+}
 
 /**
  * Class representing a connection through Unix dgram sockets transport.<br>
@@ -30,25 +38,30 @@ import { delayOp } from './utils/utils.js';
  *
  * @private
  */
-class TransportUnix {
+class TransportUnix implements GenericTransport, TransactionOwner {
+  private _connection: Connection;
+  private _socket: UnixDgramSocket | null;
+  private _local_bind: string;
+  private _attempts: number;
+  private _opening: boolean;
+  private _opened: boolean;
+  private _closing: boolean;
+  private _closed: boolean;
+  id: number;
+  name: string;
   /**
    * Create a connection through Unix dgram socket.
    *
-   * @param {module:connection~Connection} connection - The parent Janode connection
+   * @param connection - The parent Janode connection
    */
-  constructor(connection) {
+  constructor(connection: Connection) {
     /**
-     * The parent  Janode connection.
-     *
-     * @type {module:connection~Connection}
+     * The parent Janode connection.
      */
     this._connection = connection;
 
     /**
      * The internal Unix Socket.
-     *
-     * @type {UnixDgramSocket}
-     * @link https://www.npmjs.com/package/unix-dgram#api
      */
     this._socket = null;
 
@@ -59,63 +72,47 @@ class TransportUnix {
 
     /**
      * Internal counter for connection attempts.
-     *
-     * @type {number}
      */
     this._attempts = 0;
 
     /**
      * A boolean flag indicating that the connection is being opened.
-     *
-     * @type {boolean}
      */
     this._opening = false;
 
     /**
      * A boolean flag indicating that the connection has been opened.
-     *
-     * @type {boolean}
      */
     this._opened = false;
 
     /**
      * A boolean flag indicating that the connection is being closed.
-     *
-     * @type {boolean}
      */
     this._closing = false;
 
     /**
      * A boolean flag indicating that the connection has been closed.
-     *
-     * @type {boolean}
      */
     this._closed = false; // true if socket has been closed after being opened
 
     /**
      * A numerical identifier assigned for logging purposes.
-     *
-     * @type {number}
      */
     this.id = connection.id;
 
     /**
      * A more descriptive, not unique string (used for logging).
-     *
-     * @type {string}
      */
     this.name = `[${this.id}]`;
   }
 
   /**
    * Initialize the internal socket.
-   *
-   * @returns {Promise<module:connection~Connection>}
    */
-  async _initUnixSocket() {
+  async _initUnixSocket(): Promise<Connection> {
     Logger.info(`${LOG_NS} ${this.name} trying connection with ${this._connection._address_iterator.currElem().url}`);
 
-    return new Promise((resolve, reject) => {
+    return new Promise<Connection>((resolve, reject) => {
       let socket;
 
       let connected = false;
@@ -124,12 +121,12 @@ class TransportUnix {
       try {
         socket = createSocket('unix_dgram');
       } catch (error) {
-        Logger.error(`${LOG_NS} ${this.name} unix socket create error (${error.message})`);
+        Logger.error(`${LOG_NS} ${this.name} unix socket create error (${(error as Error).message})`);
         reject(error);
         return;
       }
 
-      socket.on('error', error => {
+      socket.on('error', (error: any) => {
         Logger.error(`${LOG_NS} ${this.name} unix socket error (${error.message})`);
         if (error.errno < 0) {
           this._close();
@@ -137,31 +134,35 @@ class TransportUnix {
         reject(error);
       });
 
-      socket.on('connect', _ => {
+      socket.on('connect', () => {
         Logger.info(`${LOG_NS} ${this.name} unix socket connected`);
         connected = true;
+        //TODO: Fix this
+        //@ts-expect-error
         if (bound && connected) resolve(this);
       });
 
-      socket.on('listening', _ => {
+      socket.on('listening', () => {
         Logger.info(`${LOG_NS} ${this.name} unix socket bound`);
         /* Resolve the promise and return this connection */
         bound = true;
         socket.connect(this._connection._address_iterator.currElem().url.split('file://')[1]);
+        // TODO: fix this
+        //@ts-expect-error
         if (bound && connected) resolve(this);
       });
 
-      socket.on('message', buf => {
+      socket.on('message', (buf: { toString: () => any; }) => {
         const data = buf.toString();
         Logger.debug(`${LOG_NS} ${this.name} <unix RCV OK> ${data}`);
         this._connection._handleMessage(JSON.parse(data));
       });
 
-      socket.on('writable', _ => {
+      socket.on('writable', () => {
         Logger.warn(`${LOG_NS} ${this.name} unix socket writable notification`);
       });
 
-      socket.on('congestion', _buf => {
+      socket.on('congestion', (_buf: any) => {
         Logger.warn(`${LOG_NS} ${this.name} unix socket congestion notification`);
       });
 
@@ -177,9 +178,9 @@ class TransportUnix {
    * In case of error retry the connection with another address from the available pool.
    * If maximum number of attempts is reached, throws an error.
    *
-   * @returns {UnixDgramSocket} The unix socket
+   * @returns The unix socket
    */
-  async _attemptOpen() {
+  async _attemptOpen(): Promise<Connection> {
     /* Reset status at every attempt */
     this._opened = false;
     this._closing = false;
@@ -210,19 +211,19 @@ class TransportUnix {
     }
   }
 
-  _close() {
+  _close(): void {
     if (!this._socket) return;
     Logger.info(`${LOG_NS} ${this.name} closing unix transport`);
     try {
       this._socket.close();
     } catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} error while closing unix socket (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} error while closing unix socket (${(error as Error).message})`);
     }
 
     try {
       unlinkSync(this._local_bind);
     } catch (error) {
-      Logger.error(`${LOG_NS} ${this.name} error while unlinking fd (${error.message})`);
+      Logger.error(`${LOG_NS} ${this.name} error while unlinking fd (${(error as Error).message})`);
     }
     /* removeAllListeners is only supported on the node ws module */
     if (typeof this._socket.removeAllListeners === 'function') this._socket.removeAllListeners();
@@ -235,9 +236,9 @@ class TransportUnix {
   /**
    * Open a transport connection. This is called from parent connection.
    *
-   * @returns {Promise<module:connection~Connection>} A promise resolving with the Janode connection
+   * @returns A promise resolving with the Janode connection
    */
-  async open() {
+  async open(): Promise<Connection> {
     /* Check the flags before attempting a connection */
     let error;
     if (this._opening) error = new Error('unable to open, unix socket is already being opened');
@@ -261,9 +262,10 @@ class TransportUnix {
    * Get the remote Janus hostname.
    * It is called from the parent connection.
    *
-   * @returns {string} The hostname of the Janus server
+   * @returns The hostname of the Janus server
    */
-  getRemoteHostname() {
+  // TODO: The type was originally string
+  getRemoteHostname(): string | null {
     if (this._opened) {
       return (this._connection._address_iterator.currElem().url.split('file://')[1]);
     }
@@ -273,10 +275,8 @@ class TransportUnix {
   /**
    * Gracefully close the connection.
    * It is called from the parent connection.
-   *
-   * @returns {Promise<void>}
    */
-  async close() {
+  async close(): Promise<void> {
     /* Check the status flags before */
     let error;
     if (!this._opened) error = new Error('unable to close, unix socket has never been opened');
@@ -297,10 +297,11 @@ class TransportUnix {
    * Send a request from this connection.
    * It is called from the parent connection.
    *
-   * @param {Object} request - The request to be sent
-   * @returns {Promise<Object>} A promise resolving with a response from Janus
+   * @param request - The request to be sent
+   * @returns A promise resolving with a response from Janus
    */
-  async send(request) {
+  // TODO: It seems like this just resolves with void? but this seems wrong
+  async send(request: JanodeRequest): Promise<void> {
     /* Check connection status */
     let error;
     if (!this._opened) error = new Error('unable to send request because unix socket has not been opened');
@@ -315,8 +316,8 @@ class TransportUnix {
     const string_req = JSON.stringify(request);
     const buf = Buffer.from(string_req, 'utf-8');
 
-    return new Promise((resolve, reject) => {
-      this._socket.send(buf, error => {
+    return new Promise<void>((resolve, reject) => {
+      this._socket!.send(buf, error => {
         if (error) {
           Logger.error(`${LOG_NS} ${this.name} unix socket send error (${error.message})`);
           if (error.errno < 0) {
