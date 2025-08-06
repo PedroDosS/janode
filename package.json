@@ -2,7 +2,6 @@
   "name": "janode",
   "description": "Meetecho adapter for the Janus WebRTC Server",
   "version": "1.8.0",
-  "type": "module",
   "keywords": [
     "janus",
     "webrtc",
@@ -43,8 +42,7 @@
   ],
   "dependencies": {
     "isomorphic-ws": "^4.0.1",
-    "unix-dgram": "^2.0.4",
-    "ws": "^8.0.0"
+    "unix-dgram": "^2.0.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.4.0",
