@@ -15,11 +15,14 @@ import Session from './session.ts';
 import TransactionManager from './tmanager.ts';
 import type { TransactionOwner, PendingTransaction } from './tmanager.ts';
 
-// TODO: are JanodeRequest/JanusMessage and JanodeResponse/JanodeEvent the same thing?
+// TODO: make these types not terrible
 export type JanodeRequest = any
 export type JanodeResponse = any
-export type JanusMessage = any
-export type JanodeEvent = any
+export type JanusMessage = { [index: string | symbol]: any }
+export type PluginEvent = {
+  event: string | null,
+  data: { [index: string | symbol]: unknown }
+}
 
 const PLUGIN_EVENT_SYM = Symbol('plugin_event');
 
@@ -236,7 +239,7 @@ class Handle extends EventEmitter implements TransactionOwner {
     }
 
     /* Handling of a message that did not close a transaction (e.g. async events) */
-    const janode_event_data: any = {};
+    const janode_event_data: { [index: string]: unknown } = {};
     switch (janus) {
 
       /* Generic Janus event */
@@ -391,9 +394,9 @@ class Handle extends EventEmitter implements TransactionOwner {
    *
    * @private
    */
-  _newPluginEvent(janus_message: JanusMessage): JanodeEvent {
+  _newPluginEvent(janus_message: JanusMessage): PluginEvent {
     /* Prepare an object for the output Janode event */
-    const janode_event: any = {
+    const janode_event: PluginEvent = {
       /* The name of the resolved event */
       event: null,
       /* The event payload */
@@ -415,7 +418,7 @@ class Handle extends EventEmitter implements TransactionOwner {
    *
    * @private
    */
-  _getPluginEvent(janus_message: JanusMessage): JanodeEvent {
+  _getPluginEvent(janus_message: JanusMessage): PluginEvent {
     return janus_message[PLUGIN_EVENT_SYM] || {};
   }
 
@@ -424,7 +427,7 @@ class Handle extends EventEmitter implements TransactionOwner {
    * Implementations must return falsy values for unhandled events and truthy value
    * for handled events.
    */
-  handleMessage(_janus_message: JanusMessage): JanodeEvent {
+  handleMessage(_janus_message: JanusMessage): PluginEvent | null {
     return null;
   }
 
@@ -452,8 +455,8 @@ class Handle extends EventEmitter implements TransactionOwner {
   /**
    * Helper to close a transaction with success.
    *
-   * @property {string} id - The transaction id
-   * @property {Object} [data] - The callback success data
+   * @property id - The transaction id
+   * @property [data] - The callback success data
    * @returns {void}
    */
   closeTransactionWithSuccess(id: string, data: JanodeResponse): void {
@@ -565,7 +568,7 @@ class Handle extends EventEmitter implements TransactionOwner {
       throw error;
     }
 
-    const request: any = {
+    const request: { [index: string]: any } = {
       janus: JANUS.REQUEST.TRICKLE
     };
 
@@ -614,7 +617,7 @@ class Handle extends EventEmitter implements TransactionOwner {
    * await handle.message(body, jsep);
    *
    */
-  async message(body: any, jsep?: RTCSessionDescription): Promise<JanodeResponse> {
+  async message(body: any, jsep?: RTCSessionDescriptionInit): Promise<JanodeResponse> {
     const request: any = {
       janus: JANUS.REQUEST.MESSAGE,
       body,
